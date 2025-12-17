@@ -84,15 +84,15 @@ class DNADataset(Dataset):
 
 
 def train_model():
-    fasta_path = "simulated_sequences/augumented_sequence_size100_length120.fasta"
+    fasta_path = "simulated_sequences/augumented_sequence_size100_length120_deletions20_nodeletionseq0.25.fasta"
     tokenizer = create_dna_tokenizer()
 
-    dataset = DNADataset(fasta_path, tokenizer, max_length=122)  # 120 seq + 2 special tokens
+    dataset = DNADataset(fasta_path, tokenizer, max_length=122)
 
     config = BertConfig(
-        vocab_size=10,  # Size of our vocab (0-9)
-        hidden_size=256,  # Smaller embedding size
-        num_hidden_layers=4,  # Fewer layers
+        vocab_size=10,
+        hidden_size=256,
+        num_hidden_layers=4,
         num_attention_heads=4,
         intermediate_size=512,
         max_position_embeddings=512,
