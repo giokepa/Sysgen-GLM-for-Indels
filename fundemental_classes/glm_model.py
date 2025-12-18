@@ -9,9 +9,10 @@ import os
 
 class GLMModel:
     def __init__(self, model_path, fasta_file, max_seq_length=122):
-        self.model = BertForMaskedLM.from_pretrained(model_path) or None
         self.model_path = model_path
-        self.tokenizer = PreTrainedTokenizerFast.from_pretrained(model_path) or self.create_tokenizer()
+
+        self.model = None if not os.path.exists(model_path) else BertForMaskedLM.from_pretrained(model_path)
+        self.tokenizer = self.create_tokenizer() if not os.path.exists(model_path) else PreTrainedTokenizerFast.from_pretrained(model_path)
         self.max_length = max_seq_length
         self.dataset = DNADataset(fasta_file, self.tokenizer, max_seq_length)
         self.relevant_chars = ['A', 'C', 'G', 'T', '-']
