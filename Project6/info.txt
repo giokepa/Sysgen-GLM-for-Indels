@@ -25,6 +25,7 @@ python3 --version
 # must be Python 3.x
 
 pip3 install torchvision
+pip3 install "accelerate>=0.26.0"
 
 cd /Users/amelielaura/Documents/Project6
 python3 scripts/train_glm_local.py
