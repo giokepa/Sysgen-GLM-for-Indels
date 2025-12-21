@@ -15,7 +15,7 @@ def make_deletion_alt(ref_seq: str, deletion_rate: float = 0.10) -> str:
 
 
 def main():
-    PROJECT_ROOT = "/Users/amelie.laura/Documents/Project6"
+    PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
 
     FASTA = os.path.join(
         PROJECT_ROOT,
