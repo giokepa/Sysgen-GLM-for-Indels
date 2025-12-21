@@ -1,0 +1,7 @@
+Method 1 — Fast Δ-likelihood-ish score (no masking)
+
+This method is a quick screening score. We run the model once on the reference sequence and once on the perturbed sequence. At each position we read the log-probability the model assigns to the nucleotide that is actually present at that position. We sum these log-probabilities over the sequence (or a region) and take the difference between perturbed and reference. Because the model is a masked language model, this is not a true likelihood in the strict sense (we are not masking each position), but it is extremely fast and gives a useful “how much does the model prefer REF over ALT” signal.
+
+Method 2 — Probability-shift / influence score (Pedro-inspired; mask targets)
+
+This method is closer to a dependency or influence idea: a change at one position can shift the model’s beliefs about other positions. We compare REF and ALT, identify the changed positions (the deletion positions), and then scan a set of target positions. For each target position we mask it and compute the predicted distribution over {A,C,G,T,-} under REF and under ALT. The score measures how much these two distributions differ (e.g. via max absolute log-odds difference / KL / TV), and we aggregate these shifts across targets (and across all deletion positions). This detects whether a deletion has wider “context effects” on what the model expects elsewhere, not just at the edited site.
