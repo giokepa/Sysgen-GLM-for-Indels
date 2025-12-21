@@ -5,3 +5,36 @@ This method is a quick screening score. We run the model once on the reference s
 Method 2 — Probability-shift / influence score (Pedro-inspired; mask targets)
 
 This method is closer to a dependency or influence idea: a change at one position can shift the model’s beliefs about other positions. We compare REF and ALT, identify the changed positions (the deletion positions), and then scan a set of target positions. For each target position we mask it and compute the predicted distribution over {A,C,G,T,-} under REF and under ALT. The score measures how much these two distributions differ (e.g. via max absolute log-odds difference / KL / TV), and we aggregate these shifts across targets (and across all deletion positions). This detects whether a deletion has wider “context effects” on what the model expects elsewhere, not just at the edited site.
+
+
+I used your augmented FASTA file with the 10.000 sequences that already contains sequences with and without deletions (as I understood, please correct me there). The distinction between reference and perturbed sequences is: the reference is the undeleted sequence and the perturbed sequence is the same sequence with a deletion. Both are processed identically, so any difference in model behaviour can be attributed directly to the deletion.
+
+I trained a DNA masked language model (with Georgi’s code) on this dataset and then evaluated how deletions affect the model using two complementary approaches (basically I only modified the glm_model.py and the new model in my case is called (glm_model_new.py) . The first is a fast, global score that compares the log-likelihood of the reference and perturbed sequences. A strong drop in likelihood shows that the deleted segment was important for the model’s overall understanding of the sequence (I understood like that)
+
+The second approach looks at probability shifts at individual positions by comparing predicted nucleotide distributions between reference and perturbed sequences. This captures more fine-grained and maybe non-local effects of deletions.
+
+In addition, I generate reconstruction plots to visualize how the model’s confidence changes along the sequence after a deletion. For now, I tested this on a limited number of sequences to validate that the pipeline works end to end. With the implementation now stable, it can be scaled up for more systematic analyses (we can extend it after that) . After ref and alt, those numbers are just the sequence indices from your FASTA / dataset; nothing more, nothing biological.
+
+The scores at the end are the numerical summaries of how much the deletion changes the model’s behavior when comparing ref (reference) to alt (perturbed).
+
+
+
+Concretely, you have two scores:
+
+
+The first score is the Δ log-likelihood (delta likelihood).
+
+This number tells you how much worse the model explains the sequence after the deletion. It is computed by taking the log-likelihood of the reference sequence and subtracting the log-likelihood of the perturbed sequence. If the score is large in magnitude, it means the deleted segment was important for the model’s overall understanding of the sequence. If it is close to zero, the deletion has little global effect. This score is global and fast.
+
+
+The second score is the influence / probability-shift score.
+
+This number measures how strongly the deletion changes the model’s predicted nucleotide probabilities across the sequence. Instead of looking at the whole sequence at once, it compares probability distributions at individual positions between ref and alt and aggregates how much they shift. A higher score means the deletion causes stronger or more widespread changes in predictions, including non-local effects. A lower score means the effect is small or very local.
+
+
+In short:
+
+The Δ log-likelihood score answers “Does the deletion globally disrupt the sequence according to the model?”
+The influence score answers “Where and how strongly does the deletion affect the model’s predictions?”
+
+Together, these scores give you both a global and a local/mechanistic view of the impact of a deletion.
