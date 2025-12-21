@@ -10,7 +10,7 @@ PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
 FASTA_PATH = os.path.join(
     PROJECT_ROOT,
     "data",
-    "augumented_sequence_size100000_length150_deletions0.1_nodeletionseq0.25.fasta"
+    "augumented_sequence_size10000_length150_deletions0.1_nodeletionseq0.25.fasta"
 )
 MODEL_OUT = os.path.join(PROJECT_ROOT, "model_out")
 
