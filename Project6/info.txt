@@ -24,6 +24,8 @@ pip3 install -r requirements.txt
 python3 --version
 # must be Python 3.x
 
+pip3 install torchvision
+
 cd /Users/amelielaura/Documents/Project6
 python3 scripts/train_glm_local.py
 python3 scripts/eval_glm_local.py
