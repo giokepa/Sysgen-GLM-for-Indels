@@ -11,12 +11,9 @@ class SequenceLogoPlotter:
         pass
 
     def plot(self, header, sequence, prob_matrix, motif_length=10):
-        """Create the final visualization"""
-        # Convert to DataFrame and IC
         df = pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T', '-'])
         ic_df = logomaker.transform_matrix(df, from_type='probability', to_type='information')
 
-        # Plot
         fig, ax = plt.subplots(figsize=(15, 2.5))
 
         dna_colors = {'A': 'green', 'C': 'blue', 'G': 'orange', 'T': 'red', '-': 'black'}
@@ -26,14 +23,12 @@ class SequenceLogoPlotter:
         ax.spines['left'].set_visible(True)
         ax.set_ylabel("Reconstruction\n(scaled by IC)", fontsize=9)
 
-        # X-axis dashes
         seq_len = len(sequence)
         ax.set_xlim(0, seq_len)
         ax.xaxis.set_major_locator(plt.MultipleLocator(10))
         ax.xaxis.set_minor_locator(plt.MultipleLocator(1))
         ax.tick_params(axis='x', which='both', labelbottom=False, bottom=True, length=3)
 
-        # Motif annotations
         start_a, start_b = DNADataset.parse_header(header)
         y_line = -0.05
 

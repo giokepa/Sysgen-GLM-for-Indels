@@ -18,7 +18,8 @@ class GLMModel:
         self.model_path = model_path
 
         self.model = None if not os.path.exists(model_path) else BertForMaskedLM.from_pretrained(model_path)
-        self.tokenizer = self.create_tokenizer() if not os.path.exists(model_path) else PreTrainedTokenizerFast.from_pretrained(model_path)
+        self.tokenizer = self.create_tokenizer() if not os.path.exists(
+            model_path) else PreTrainedTokenizerFast.from_pretrained(model_path)
         self.max_length = max_seq_length
         self.dataset = DNADataset(fasta_file, self.tokenizer, max_seq_length)
         self.relevant_chars = ['A', 'C', 'G', 'T', '-']
@@ -28,13 +29,13 @@ class GLMModel:
         os.makedirs(self.model_path, exist_ok=True)
 
         config = BertConfig(
-        vocab_size=10,
-        hidden_size=384,
-        num_hidden_layers=6,
-        num_attention_heads=6,
-        intermediate_size=1536,
-        max_position_embeddings=512,
-        type_vocab_size=1,
+            vocab_size=10,
+            hidden_size=256,
+            num_hidden_layers=6,
+            num_attention_heads=4,
+            intermediate_size=1024,
+            max_position_embeddings=512,
+            type_vocab_size=1,
         )
 
         model = BertForMaskedLM(config)
@@ -49,17 +50,14 @@ class GLMModel:
             overwrite_output_dir=True,
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
+            learning_rate=lr,
             gradient_accumulation_steps=2,
             save_steps=5000,
-            logging_steps=200,
+            logging_steps=500,
             log_level="error",
             logging_first_step=True,
             report_to="all",
-            learning_rate=lr,
-            warmup_steps=500,
-            weight_decay=0.01,
-            dataloader_pin_memory=True,
-            remove_unused_columns=False,
+            warmup_steps=1000,
             disable_tqdm=False,  # TURN THIS TRUE IF YOU WANNA NOT HAVE FANCY LOADING BAR
         )
 
@@ -101,16 +99,34 @@ class GLMModel:
         return probs.cpu().numpy()
 
     def get_full_reconstruction_probs(self, sequence_to_evaluate):
-        seq_len = len(sequence_to_evaluate)
+        inputs = self.tokenizer(sequence_to_evaluate, return_tensors="pt")
+        input_ids = inputs["input_ids"].to(self.device)
+
+        seq_len = input_ids.shape[1]
+
+        num_valid_tokens = seq_len - 2
+        prob_matrix = np.zeros((num_valid_tokens, len(self.relevant_chars)))
+
         char_to_id = {c: self.tokenizer.vocab[c] for c in self.relevant_chars}
+        mask_token_id = self.tokenizer.mask_token_id  # This is ID 4
 
-        prob_matrix = np.zeros((seq_len, len(self.relevant_chars)))
+        for i in range(num_valid_tokens):
+            token_idx = i + 1
 
-        for pos in range(seq_len):
-            probs = self.predict_position(sequence_to_evaluate, pos)
+            masked_input_ids = input_ids.clone()
+            masked_input_ids[0, token_idx] = mask_token_id
 
-            for i, char in enumerate(self.relevant_chars):
-                prob_matrix[pos, i] = probs[char_to_id[char]]
+            with torch.no_grad():
+                outputs = self.model(input_ids=masked_input_ids)
+                logits = outputs.logits[0, token_idx]
+                probs = torch.softmax(logits, dim=-1).cpu().numpy()
+
+            for char_idx, char in enumerate(self.relevant_chars):
+                if char in char_to_id:
+                    prob_matrix[i, char_idx] = probs[char_to_id[char]]
+
+        row_sums = prob_matrix.sum(axis=1, keepdims=True)
+        prob_matrix = np.divide(prob_matrix, row_sums, out=np.zeros_like(prob_matrix), where=row_sums != 0)
 
         return prob_matrix
 
