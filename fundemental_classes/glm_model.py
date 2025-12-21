@@ -1,10 +1,16 @@
 import numpy as np
 import torch
-from transformers import BertForMaskedLM, PreTrainedTokenizerFast
-from transformers import *
 from tokenizers import Tokenizer, models, pre_tokenizers
 from fundemental_classes.dna_dataset import DNADataset
 import os
+from transformers import (
+    BertForMaskedLM,
+    BertConfig,
+    PreTrainedTokenizerFast,
+    DataCollatorForLanguageModeling,
+    TrainingArguments,
+    Trainer,
+)
 
 
 class GLMModel:
@@ -21,30 +27,39 @@ class GLMModel:
     def train(self, epochs=30, batch_size=16, lr=2e-4):
         os.makedirs(self.model_path, exist_ok=True)
 
+        config = BertConfig(
+        vocab_size=10,
+        hidden_size=384,
+        num_hidden_layers=6,
+        num_attention_heads=6,
+        intermediate_size=1536,
+        max_position_embeddings=512,
+        type_vocab_size=1,
+        )
+
+        model = BertForMaskedLM(config)
+        model.to(self.device)
+
         data_collator = DataCollatorForLanguageModeling(
             tokenizer=self.tokenizer, mlm=True, mlm_probability=0.15
         )
-
-        config = BertConfig(
-            vocab_size=10, hidden_size=256, num_hidden_layers=4,
-            num_attention_heads=4, intermediate_size=512,
-            max_position_embeddings=512, type_vocab_size=1
-        )
-        model = BertForMaskedLM(config)
 
         training_args = TrainingArguments(
             output_dir=self.model_path,
             overwrite_output_dir=True,
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
-            save_steps=1000,
-            logging_steps=10,
-            log_level="info",
+            gradient_accumulation_steps=2,
+            save_steps=5000,
+            logging_steps=200,
+            log_level="error",
             logging_first_step=True,
             report_to="all",
             learning_rate=lr,
-            warmup_steps=100,
-            dataloader_pin_memory=False,
+            warmup_steps=500,
+            weight_decay=0.01,
+            dataloader_pin_memory=True,
+            remove_unused_columns=False,
             disable_tqdm=False,  # TURN THIS TRUE IF YOU WANNA NOT HAVE FANCY LOADING BAR
         )
 
@@ -66,7 +81,6 @@ class GLMModel:
         self.plot_training_curves(trainer.state.log_history)
 
         self.model = model
-        self.model.to(self.device)
         self.model.eval()
 
     def predict_position(self, sequence, position):
