@@ -11,24 +11,30 @@ class SequenceLogoPlotter:
         pass
 
     def plot(self, header, sequence, prob_matrix, motif_length=10):
-        """Show plot interactively."""
-        fig = self._make_fig(header, sequence, prob_matrix, motif_length)
+        """
+        Plot to screen.
+        prob_matrix: shape (L, 5) columns A,C,G,T,-
+        """
+        fig, ax = self._build_plot(header, sequence, prob_matrix, motif_length)
         plt.show()
         plt.close(fig)
 
-    def plot_to_file(self, header, sequence, prob_matrix, out_png, motif_length=10):
-        """Save plot to PNG (for running lots of sequences)."""
-        fig = self._make_fig(header, sequence, prob_matrix, motif_length)
-        fig.savefig(out_png, dpi=200, bbox_inches="tight")
+    def plot_to_file(self, header, sequence, prob_matrix, out_png, motif_length=10, dpi=200):
+        """
+        Plot directly to a PNG file (for Slurm / batch usage).
+        """
+        fig, ax = self._build_plot(header, sequence, prob_matrix, motif_length)
+        fig.savefig(out_png, dpi=dpi, bbox_inches="tight")
         plt.close(fig)
 
-    def _make_fig(self, header, sequence, prob_matrix, motif_length=10):
+    def _build_plot(self, header, sequence, prob_matrix, motif_length):
         df = pd.DataFrame(prob_matrix, columns=["A", "C", "G", "T", "-"])
         ic_df = logomaker.transform_matrix(df, from_type="probability", to_type="information")
 
         fig, ax = plt.subplots(figsize=(15, 2.5))
 
         dna_colors = {"A": "green", "C": "blue", "G": "orange", "T": "red", "-": "black"}
+
         logo = logomaker.Logo(ic_df, ax=ax, color_scheme=dna_colors, vpad=0.0, width=1.0)
         logo.style_spines(spines=["top", "right", "left"], visible=False)
         ax.spines["left"].set_visible(True)
@@ -73,5 +79,6 @@ class SequenceLogoPlotter:
 
         clean_title = header.split("|")[0].replace(">", "")
         ax.set_title(f"Sequence: {clean_title}", fontsize=10)
-        plt.tight_layout()
-        return fig
+
+        fig.tight_layout()
+        return fig, ax
