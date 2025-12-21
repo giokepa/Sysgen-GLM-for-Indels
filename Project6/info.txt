@@ -1,16 +1,19 @@
-/Users/amelie.laura/Documents/Project6/
+Project6/
   data/
     augumented_sequence_size100000_length150_deletions0.1_nodeletionseq0.25.fasta
-  model_out/
-  outputs/
-    plots/
-    scores/
-  code/
+  lib/
+    __init__.py
     glm_model_new.py
     dna_dataset.py
     sequence_plotter.py
+  scripts/
+    train_glm_local.py
     eval_glm_local.py
-  requirements.txt
+  outputs/
+    (created automatically)
+  model_out/
+    (created automatically by training)
+requirements.txt
 
 cd /Users/amelie.laura/Documents/Project6
 python3 -m venv .venv
@@ -21,7 +24,6 @@ pip3 install -r requirements.txt
 python3 --version
 # must be Python 3.x
 
-cd /Users/amelie.laura/Documents/Project6/code
-source ../.venv/bin/activate
-python3 eval_glm_local.py
-  
+cd /Users/amelielaura/Documents/Project6
+python3 scripts/train_glm_local.py
+python3 scripts/eval_glm_local.py
