@@ -397,5 +397,5 @@ class GLMModel:
             "query_positions": query_positions,
             "target_window": (t0, t1),
             "per_query": per_query_breakdown
-        }
+        } 
 
