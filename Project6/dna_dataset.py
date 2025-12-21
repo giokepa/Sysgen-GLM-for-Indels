@@ -5,7 +5,7 @@ import re
 class DNADataset(torch.utils.data.Dataset):
     """
     Reads a FASTA file.
-    Keeps:
+    Keeps: 
       - self.headers: list[str]
       - self.seqs:    list[str]
     """
