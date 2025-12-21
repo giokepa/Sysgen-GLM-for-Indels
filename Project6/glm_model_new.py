@@ -1,7 +1,14 @@
 import numpy as np
 import torch
 from transformers import BertForMaskedLM, PreTrainedTokenizerFast
-from transformers import *
+from transformers import (
+    BertConfig,
+    BertForMaskedLM,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForLanguageModeling,
+    PreTrainedTokenizerFast,
+)
 from tokenizers import Tokenizer, models, pre_tokenizers
 from lib.dna_dataset import DNADataset
 import os
