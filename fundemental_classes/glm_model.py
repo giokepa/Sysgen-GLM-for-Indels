@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 from tokenizers import Tokenizer, models, pre_tokenizers
@@ -13,6 +15,53 @@ from transformers import (
 )
 
 
+@dataclass
+class MotifAwareCollator:
+    tokenizer: PreTrainedTokenizerFast
+    motif_prob: float = 0.8  # High probability to mask motifs
+    bg_prob: float = 0.1  # Low probability to mask background
+
+    def __call__(self, examples):
+        input_ids = torch.stack([e['input_ids'] for e in examples])
+        attention_mask = torch.stack([e['attention_mask'] for e in examples])
+
+        # Create a probability matrix for masking
+        prob_matrix = torch.full(input_ids.shape, self.bg_prob)
+
+        for i, ex in enumerate(examples):
+            pos_a = ex.get("pos_a", -1)
+            pos_b = ex.get("pos_b", -1)
+
+            # Apply higher probability to motif regions (offset by 1 for CLS token)
+            if pos_a != -1:
+                prob_matrix[i, pos_a + 1: pos_a + 8] = self.motif_prob
+            if pos_b != -1:
+                prob_matrix[i, pos_b + 1: pos_b + 8] = self.motif_prob
+
+        # Decide which tokens to mask based on the probability matrix
+        masked_indices = torch.bernoulli(prob_matrix).bool()
+
+        # Never mask special tokens
+        special_tokens_mask = torch.tensor([
+            self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in input_ids.tolist()
+        ], dtype=torch.bool)
+        masked_indices[special_tokens_mask] = False
+
+        # Prepare labels: -100 for non-masked tokens
+        labels = input_ids.clone()
+        labels[~masked_indices] = -100
+
+        # Apply 80/10/10 strategy to masked tokens
+        # 80% become [MASK]
+        indices_replaced = torch.bernoulli(torch.full(input_ids.shape, 0.8)).bool() & masked_indices
+        input_ids[indices_replaced] = self.tokenizer.mask_token_id
+
+        # 10% become random
+        indices_random = torch.bernoulli(torch.full(input_ids.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+        random_words = torch.randint(len(self.tokenizer), input_ids.shape, dtype=torch.long)
+        input_ids[indices_random] = random_words[indices_random]
+
+        return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask}
 class GLMModel:
     def __init__(self, model_path, fasta_file, max_seq_length=122):
         self.model_path = model_path
@@ -41,8 +90,8 @@ class GLMModel:
         model = BertForMaskedLM(config)
         model.to(self.device)
 
-        data_collator = DataCollatorForLanguageModeling(
-            tokenizer=self.tokenizer, mlm=True, mlm_probability=0.15
+        data_collator = MotifAwareCollator(
+            tokenizer=self.tokenizer, motif_prob=0.8, bg_prob=0.1
         )
 
         training_args = TrainingArguments(
