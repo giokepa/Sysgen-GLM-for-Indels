@@ -1,6 +1,6 @@
 Project6/
   data/
-    augumented_sequence_size100000_length150_deletions0.1_nodeletionseq0.25.fasta
+    augumented_sequence_size10000_length150_deletions0.1_nodeletionseq0.25.fasta
   lib/
     __init__.py
     glm_model_new.py
