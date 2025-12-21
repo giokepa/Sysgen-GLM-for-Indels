@@ -16,12 +16,12 @@ cd /Users/amelie.laura/Documents/Project6
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
-python --version
+python3 --version
 # must be Python 3.x
 
 cd /Users/amelie.laura/Documents/Project6/code
 source ../.venv/bin/activate
-python eval_glm_local.py
+python3 eval_glm_local.py
   
