@@ -3,18 +3,12 @@ import re
 
 
 class DNADataset(torch.utils.data.Dataset):
-    """
-    Reads a FASTA file and returns tokenized sequences for MLM training.
-
-    IMPORTANT:
-    - Keeps BOTH headers and sequences.
-    - Tokenization uses padding/truncation to max_len.
-    """
     def __init__(self, fasta_file, tokenizer, max_len):
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.fasta_file = fasta_file
-        self.headers, self.seqs = self._read_fasta()
+
+        self.headers, self.seqs = self._read_fasta_with_headers()
 
     def __len__(self):
         return len(self.seqs)
@@ -30,30 +24,33 @@ class DNADataset(torch.utils.data.Dataset):
         )
         return {k: v.squeeze(0) for k, v in encoded.items()}
 
-    def _read_fasta(self):
+    def _read_fasta_with_headers(self):
         headers = []
-        seqs = []
+        sequences = []
+
         with open(self.fasta_file, "r") as f:
             current_header = None
-            current_seq = []
+            current_seq = ""
+
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
+
                 if line.startswith(">"):
                     if current_header is not None:
                         headers.append(current_header)
-                        seqs.append("".join(current_seq))
+                        sequences.append(current_seq)
                     current_header = line
-                    current_seq = []
+                    current_seq = ""
                 else:
-                    current_seq.append(line)
+                    current_seq += line
 
             if current_header is not None:
                 headers.append(current_header)
-                seqs.append("".join(current_seq))
+                sequences.append(current_seq)
 
-        return headers, seqs
+        return headers, sequences
 
     @staticmethod
     def parse_header(header_str):
