@@ -1,11 +1,12 @@
 import numpy as np
 import torch
 from transformers import BertForMaskedLM, PreTrainedTokenizerFast
-from transformers import *
+from transformers import DataCollatorForLanguageModeling, BertConfig, TrainingArguments, Trainer
 from tokenizers import Tokenizer, models, pre_tokenizers
-from dna_dataset import DNADataset
 import os
 import torch.nn.functional as F
+
+from dna_dataset import DNADataset
 
 
 class GLMModel:
@@ -23,7 +24,11 @@ class GLMModel:
             self.model.to(self.device)
             self.model.eval()
 
-    def train(self, epochs=30, batch_size=16, lr=2e-4):
+    def train(self, epochs=3, batch_size=16, lr=2e-4):
+        """
+        epochs default lowered to 3 for local testing.
+        Raise later.
+        """
         os.makedirs(self.model_path, exist_ok=True)
 
         data_collator = DataCollatorForLanguageModeling(
@@ -46,7 +51,7 @@ class GLMModel:
             logging_steps=10,
             log_level="info",
             logging_first_step=True,
-            report_to="all",
+            report_to="none",
             learning_rate=lr,
             warmup_steps=100,
             dataloader_pin_memory=False,
@@ -67,8 +72,6 @@ class GLMModel:
         self.tokenizer.save_pretrained(self.model_path)
         print("Training complete!")
 
-        self.plot_training_curves(trainer.state.log_history)
-
         self.model = model
         self.model.to(self.device)
         self.model.eval()
@@ -77,9 +80,6 @@ class GLMModel:
         input_seq = list(sequence)
         input_seq[position] = '[MASK]'
         input_str = ''.join(input_seq)
-
-        if self.model is None:
-            raise RuntimeError("No trained model found/loaded. Train first or point model_path to a trained model directory.")
 
         inputs = self.tokenizer(input_str, return_tensors="pt").to(self.device)
 
@@ -105,54 +105,6 @@ class GLMModel:
         return prob_matrix
 
     @staticmethod
-    def plot_training_curves(log_history):
-        import matplotlib.pyplot as plt
-
-        if not log_history or len(log_history) < 2:
-            print("No training logs available for plotting.")
-            print(f"Log history length: {len(log_history)}")
-            return
-
-        losses = []
-        lrs = []
-        steps = []
-
-        for i, log in enumerate(log_history):
-            if 'loss' in log:
-                losses.append(log['loss'])
-                steps.append(i)
-            if 'learning_rate' in log:
-                lrs.append(log['learning_rate'])
-
-        if not losses:
-            print("No loss data found in logs.")
-            return
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-
-        ax1.plot(steps[:len(losses)], losses, 'b-', linewidth=2, marker='o')
-        ax1.set_title('Training Loss')
-        ax1.set_xlabel('Logging Steps')
-        ax1.set_ylabel('Cross-Entropy Loss')
-        ax1.grid(True, alpha=0.3)
-
-        if lrs:
-            ax2.plot(steps[:len(lrs)], lrs, 'r-', linewidth=2, marker='s')
-            ax2.set_title('Learning Rate Schedule')
-            ax2.set_xlabel('Logging Steps')
-            ax2.set_ylabel('Learning Rate')
-            ax2.grid(True, alpha=0.3)
-            ax2.set_yscale('log')
-        else:
-            ax2.text(0.5, 0.5, 'No LR data\nlogged', ha='center', va='center', transform=ax2.transAxes)
-            ax2.set_title('Learning Rate (No Data)')
-
-        plt.tight_layout()
-        plt.show()
-
-        print(f"Final loss: {losses[-1]:.4f}")
-
-    @staticmethod
     def create_tokenizer():
         vocab = {
             "[PAD]": 0,
@@ -176,13 +128,15 @@ class GLMModel:
             cls_token="[CLS]", mask_token="[MASK]"
         )
 
-    # NEW METHOD 1
+    # =====================================================================
+    # NEW METHOD 1: FAST Δ-likelihood-ish score WITHOUT masking
+    # =====================================================================
     def delta_likelihood_fast(self, reference_sequence, perturbed_sequence, region=None):
-        if self.model is None:
-            raise RuntimeError("No trained model found/loaded. Train first or point model_path to a trained model directory.")
-
         if len(reference_sequence) != len(perturbed_sequence):
-            raise ValueError("reference_sequence and perturbed_sequence must have the same length (use '-' for deletions).")
+            raise ValueError(
+                "reference_sequence and perturbed_sequence must have the same length. "
+                "For deletions, encode them as '-' so lengths stay aligned."
+            )
 
         if region is None:
             start = 0
@@ -223,9 +177,16 @@ class GLMModel:
         alt_sum = float(alt_per_pos.sum().item())
         delta = alt_sum - ref_sum
 
-        return {"delta": delta, "reference_sum": ref_sum, "perturbed_sum": alt_sum, "region": (start, end)}
+        return {
+            "delta": delta,
+            "reference_sum": ref_sum,
+            "perturbed_sum": alt_sum,
+            "region": (start, end),
+        }
 
-    # NEW METHOD 2
+    # =====================================================================
+    # NEW METHOD 2: Influence / dependency-like score (mask TARGET positions)
+    # =====================================================================
     def influence_probability_shift(self,
                                    reference_sequence,
                                    perturbed_sequence,
@@ -235,11 +196,10 @@ class GLMModel:
                                    reduce="mean",
                                    eps=1e-9):
 
-        if self.model is None:
-            raise RuntimeError("No trained model found/loaded. Train first or point model_path to a trained model directory.")
-
         if len(reference_sequence) != len(perturbed_sequence):
-            raise ValueError("reference_sequence and perturbed_sequence must have the same length (use '-' for deletions).")
+            raise ValueError(
+                "reference_sequence and perturbed_sequence must have the same length."
+            )
 
         if query_positions is None:
             query_positions = [i for i, (a, b) in enumerate(zip(reference_sequence, perturbed_sequence)) if a != b]
@@ -282,21 +242,27 @@ class GLMModel:
                 return 0.5 * torch.sum(torch.abs(p_alt - p_ref))
             raise ValueError(f"Unknown metric: {metric}")
 
-        total_score = 0.0
+        per_query_scores = []
         for q in query_positions:
-            per_target_scores = []
+            q = int(q)
+            vals = []
             for j in targets:
                 if j == q:
                     continue
                 p_ref = masked_probs_over_acgt_gap(reference_sequence, j)
                 p_alt = masked_probs_over_acgt_gap(perturbed_sequence, j)
-                per_target_scores.append(float(score_shift(p_ref, p_alt).item()))
+                vals.append(float(score_shift(p_ref, p_alt).item()))
 
-            if len(per_target_scores) == 0:
-                q_score = 0.0
+            if len(vals) == 0:
+                per_query_scores.append(0.0)
             else:
-                q_score = float(np.mean(per_target_scores)) if reduce == "mean" else float(np.sum(per_target_scores))
+                per_query_scores.append(float(np.mean(vals)) if reduce == "mean" else float(np.sum(vals)))
 
-            total_score += q_score
-
-        return {"influence_score": float(total_score), "metric": metric, "reduce": reduce}
+        total = float(np.sum(per_query_scores))
+        return {
+            "influence_score": total,
+            "n_queries": len(query_positions),
+            "target_window": (t0, t1),
+            "metric": metric,
+            "reduce": reduce
+        }
