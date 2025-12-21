@@ -1,0 +1,34 @@
+Project6/
+  data/
+    augumented_sequence_size100000_length150_deletions0.1_nodeletionseq0.25.fasta
+  model_out/                 # will be created by training OR can contain a trained model
+  outputs/
+    scores/
+    plots/
+  glm_model_new.py
+  dna_dataset.py
+  sequence_plotter.py
+  eval_local.py
+  train_local.py
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+pip install torch transformers tokenizers matplotlib pandas logomaker
+
+python train_local.py \
+  --fasta data/augumented_sequence_size100000_length150_deletions0.1_nodeletionseq0.25.fasta \
+  --model_out model_out \
+  --epochs 1 \
+  --max_len 256
+
+python eval_local.py \
+  --fasta data/augumented_sequence_size100000_length150_deletions0.1_nodeletionseq0.25.fasta \
+  --model_out model_out \
+  --out_dir outputs \
+  --n_eval 200 \
+  --n_plots 10 \
+  --max_len 256
+  
+  
