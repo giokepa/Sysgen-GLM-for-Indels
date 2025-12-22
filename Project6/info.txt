@@ -18,7 +18,7 @@ requirements.txt
 cd /Users/amelie.laura/Documents/Project6
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
+python3 -m pip install --upgrade pip
 pip3 install -r requirements.txt
 
 python3 --version
@@ -30,5 +30,5 @@ pip3 install "accelerate>=0.26.0"
 pip3 install -U accelerate
 
 cd /Users/amelielaura/Documents/Project6
-python3 scripts/train_glm_local.py
-python3 scripts/eval_glm_local.py
+python3 train_glm_local.py
+python3 eval_glm_local.py
