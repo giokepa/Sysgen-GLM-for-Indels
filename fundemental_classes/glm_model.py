@@ -12,6 +12,7 @@ from transformers import (
     Trainer,
 )
 
+from torch.utils.data import random_split
 
 class GLMModel:
     def __init__(self, model_path, fasta_file, max_seq_length=122):
@@ -27,46 +28,55 @@ class GLMModel:
     def train(self, epochs=30, batch_size=16, lr=2e-4):
         os.makedirs(self.model_path, exist_ok=True)
 
+        # split the data into train and validation sets (80% train, 20% val)
+        g = torch.Generator().manual_seed(727)
+
+        n_total = len(self.dataset)
+        n_val = int(n_total * 0.2)
+        n_train = n_total - n_val
+        train_ds, val_ds = random_split(self.dataset, [n_train, n_val], generator=g)
+
+        data_collator = DataCollatorForLanguageModeling(
+            tokenizer=self.tokenizer, mlm=True, mlm_probability=0.15 # default: mask_replace_prob=0.8, random_replace_prob=0.1
+        )
+
         config = BertConfig(
         vocab_size=10,
-        hidden_size=384,
+        hidden_size=256,
         num_hidden_layers=6,
         num_attention_heads=6,
         intermediate_size=1536,
         max_position_embeddings=512,
         type_vocab_size=1,
         )
-
         model = BertForMaskedLM(config)
-        model.to(self.device)
-
-        data_collator = DataCollatorForLanguageModeling(
-            tokenizer=self.tokenizer, mlm=True, mlm_probability=0.15
-        )
 
         training_args = TrainingArguments(
             output_dir=self.model_path,
             overwrite_output_dir=True,
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
-            gradient_accumulation_steps=2,
-            save_steps=5000,
+            per_device_eval_batch_size=batch_size,
+            save_steps=500,
             logging_steps=200,
-            log_level="error",
+
+            eval_steps=500,
+            log_level="info",
             logging_first_step=True,
             report_to="all",
+            load_best_model_at_end=True, # take best model instead of last model to avoid overfitting
+            metric_for_best_model="eval_loss",
             learning_rate=lr,
-            warmup_steps=500,
-            weight_decay=0.01,
-            dataloader_pin_memory=True,
-            remove_unused_columns=False,
+            warmup_steps=100,
+            dataloader_pin_memory=False,
             disable_tqdm=False,  # TURN THIS TRUE IF YOU WANNA NOT HAVE FANCY LOADING BAR
         )
 
         trainer = Trainer(
             model=model,
             args=training_args,
-            train_dataset=self.dataset,
+            train_dataset=train_ds,
+            eval_dataset=val_ds,
             data_collator=data_collator,
         )
 
@@ -81,6 +91,7 @@ class GLMModel:
         self.plot_training_curves(trainer.state.log_history)
 
         self.model = model
+        self.model.to(self.device)
         self.model.eval()
 
     def predict_position(self, sequence, position):
