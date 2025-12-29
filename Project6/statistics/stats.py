@@ -26,7 +26,7 @@ What this script does
       - deletions BETWEEN motifs
         (region from end of A to start of B)
 
-    python3 stats.py
+    python3 stats.py 
 """
 
 from __future__ import annotations
