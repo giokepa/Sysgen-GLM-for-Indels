@@ -1,32 +1,38 @@
 """
-What this script does
----------------------
+Motif and deletion statistics for FASTA sequences
+=================================================
 
-1) Reads a FASTA file where each header stores:
-      - label (which motifs are present)
-      - motif positions (posAmotif, posBmotif)
-      - gaplength
-      - deletions (total deletions reported in header)
+This script reads a FASTA file where each header encodes:
 
-2) Counts how many sequences fall into each label:
-      - both
-      - A_only
-      - B_only
-      - no_motif
+- Which motifs are present (`label`)
+  - `both`
+  - `A_only`
+  - `B_only`
+  - `no_motif`
+- Motif positions (`posAmotif`, `posBmotif`)
+- Distance between motifs (`gaplength`)
+- Total deletions reported in the header (`deletions`)
 
-3) For A_only and B_only:
-      - distribution of motif start positions
-      - total deletions per sequence
-      - deletions BEFORE the motif and AFTER the motif
-        (so we see where deletions tend to cluster)
+From these sequences:
 
-4) For both:
-      - motif A and motif B start position distributions
-      - total deletions per sequence
-      - deletions BETWEEN motifs
-        (region from end of A to start of B)
+1. Loads all sequences and metadata into a pandas DataFrame.
+2. Counts how many sequences fall into each label.
+3. Checks that the deletion count in the header matches the deletions in the sequence.
+4. For `A_only` and `B_only` sequences:
+   - Summarizes motif start positions.
+   - Counts total deletions per sequence.
+   - Splits deletions into those before and after the motif.
+5. For `both` sequences:
+   - Summarizes the start positions of motif A and motif B.
+   - Counts total deletions per sequence.
+   - Counts deletions between motif A and motif B (from end of A to start of B).
+6. Saves:
+   - Several plots into `PLOT_DIR`.
+   - CSV files with per-sequence statistics into `out_dir`.
 
-    python3 stats.py 
+Run from the command line:
+
+    python3 stats.py
 """
 
 from __future__ import annotations
@@ -42,14 +48,20 @@ import matplotlib.pyplot as plt
 # -------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------
-FASTA = Path("/Users/amelielaura/Documents/Project6/data/augumented_sequence_size10000_length150_deletions0.1_nodeletionseq0.25.fasta")
+
+FASTA = Path(
+    "/Users/amelielaura/Documents/Project6/data/"
+    "augumented_sequence_size10000_length150_deletions0.1_nodeletionseq0.25.fasta"
+)
+
+PLOT_DIR = Path("/Users/amelielaura/Documents/Project6/plot_results")
 
 MOTIF_A = "ATATTCA"
 MOTIF_B = "GTACTGC"
 LEN_A = len(MOTIF_A)
 LEN_B = len(MOTIF_B)
 
-# Color‑blind‑friendly palette from internet
+# Color-blind-friendly palette
 CBF_COLORS: Dict[str, str] = {
     "blue": "#377eb8",
     "orange": "#ff7f00",
@@ -63,8 +75,8 @@ CBF_COLORS: Dict[str, str] = {
 }
 
 
-def friendly_style() -> None:
-    """Set a light, grid‑based style with good fonts."""
+def set_friendly_style() -> None:
+    """grid-based style with readable fonts."""
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.rcParams.update(
         {
@@ -84,7 +96,8 @@ def friendly_style() -> None:
     )
 
 
-friendly_style()
+set_friendly_style()
+
 
 # -------------------------------------------------------------------
 # FASTA parsing
@@ -93,10 +106,10 @@ friendly_style()
 
 def parse_header(header_line: str) -> Dict[str, Any]:
     """
-    Turn a FASTA header with embedded metadata into a readable dictionary.
+    Parse a FASTA header containing metadata into a dictionary.
 
-    Expected format (one example):
-        >seq0001|label=both|posAmotif=12|posBmotif=45|gaplength=30|deletions=14
+    Example format:
+    >seq0001|label=both|posAmotif=12|posBmotif=45|gaplength=30|deletions=14
     """
     raw_fields = header_line.lstrip(">").split("|")
     record: Dict[str, Any] = {"id": raw_fields[0]}
@@ -120,7 +133,7 @@ def parse_header(header_line: str) -> Dict[str, Any]:
 
 
 def read_fasta_with_metadata(path: Path) -> pd.DataFrame:
-    """Read a FASTA file with metadata‑rich headers into a DataFrame."""
+    """Read a FASTA file with headers into a DataFrame."""
     records: list[Dict[str, Any]] = []
     current_header: Optional[str] = None
     current_seq_lines: list[str] = []
@@ -173,6 +186,7 @@ def deletions_after_motif(sequence: str, motif_start: int, motif_length: int) ->
 def deletions_between_motifs(sequence: str, posA: int, posB: int) -> float:
     """
     Count deletions between the end of motif A and the start of motif B.
+
     Returns numpy.nan if motif B starts before motif A ends.
     """
     start = posA + LEN_A
@@ -188,7 +202,7 @@ def deletions_between_motifs(sequence: str, posA: int, posB: int) -> float:
 
 
 def describe_series(label: str, values: np.ndarray) -> None:
-    """Print a compact summary for a 1D numeric array."""
+    """Print a summary for a 1D numeric array."""
     if values.size == 0:
         print(f"\n{label}: no values to summarize.")
         return
@@ -220,7 +234,7 @@ def plot_bar(
     ylabel: str,
     rotation: int = 15,
 ) -> None:
-    """Draw a simple, readable bar chart."""
+    """Draw a simple, good bar chart."""
     ax.bar(x_values, heights, color=color, edgecolor="#333333")
     ax.set_title(title)
     ax.set_xlabel(xlabel)
@@ -239,7 +253,7 @@ def plot_hist(
     ylabel: str = "Count",
     title: str = "",
 ) -> None:
-    """Draw a histogram with gentle defaults."""
+    """Draw a histogram with defaults."""
     ax.hist(
         data,
         bins=bins,
@@ -251,6 +265,14 @@ def plot_hist(
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
+
+
+def save_figure(fig: plt.Figure, filename: str) -> None:
+    """Save a figure into PLOT_DIR and report the destination."""
+    PLOT_DIR.mkdir(parents=True, exist_ok=True)
+    outpath = PLOT_DIR / filename
+    fig.savefig(outpath, dpi=300, bbox_inches="tight")
+    print(f"Saved plot -> {outpath}")
 
 
 # -------------------------------------------------------------------
@@ -265,10 +287,12 @@ def main() -> None:
 
     df = read_fasta_with_metadata(FASTA)
 
+    # Basic per-sequence information
     df["length"] = df["seq"].str.len()
     df["del_total_calc"] = df["seq"].str.count("-")
     df["del_header_matches"] = df["del_total_calc"].eq(df["del_total_header"])
 
+    # How many sequences of each motif pattern?
     counts = (
         df["label"]
         .value_counts()
@@ -281,7 +305,8 @@ def main() -> None:
     print("\n=== Overview: sequences by motif pattern ===")
     print(counts.to_string(index=False))
 
-    print("\n=== Quick sanity checks ===")
+    # Quick sanity checks
+    print("\n=== Checks ===")
     print(f"- Total number of sequences             : {len(df)}")
     lengths = sorted(df["length"].unique().tolist())
     print(f"- Sequence lengths observed (first 10)  : {lengths[:10]}")
@@ -292,79 +317,86 @@ def main() -> None:
         f"{match_rate:.2f}% of sequences"
     )
 
-    Aonly = df[df["label"] == "A_only"].copy()
-    Bonly = df[df["label"] == "B_only"].copy()
-    BOTH = df[df["label"] == "both"].copy()
+    # Split by motif label
+    a_only = df[df["label"] == "A_only"].copy()
+    b_only = df[df["label"] == "B_only"].copy()
+    both_motifs = df[df["label"] == "both"].copy()
 
-    def compute_del_before_A(row: pd.Series) -> int:
+    # Deletion counts relative to motifs
+    def count_deletions_before_A(row: pd.Series) -> int:
         return deletions_before_motif(row["seq"], int(row["posA"]))
 
-    def compute_del_after_A(row: pd.Series) -> int:
+    def count_deletions_after_A(row: pd.Series) -> int:
         return deletions_after_motif(row["seq"], int(row["posA"]), LEN_A)
 
-    def compute_del_before_B(row: pd.Series) -> int:
+    def count_deletions_before_B(row: pd.Series) -> int:
         return deletions_before_motif(row["seq"], int(row["posB"]))
 
-    def compute_del_after_B(row: pd.Series) -> int:
+    def count_deletions_after_B(row: pd.Series) -> int:
         return deletions_after_motif(row["seq"], int(row["posB"]), LEN_B)
 
-    def compute_del_between(row: pd.Series) -> float:
+    def count_deletions_between(row: pd.Series) -> float:
         return deletions_between_motifs(row["seq"], int(row["posA"]), int(row["posB"]))
 
-    if len(Aonly) > 0:
-        Aonly["del_before_A"] = Aonly.apply(compute_del_before_A, axis=1)
-        Aonly["del_after_A"] = Aonly.apply(compute_del_after_A, axis=1)
+    if len(a_only) > 0:
+        a_only["del_before_A"] = a_only.apply(count_deletions_before_A, axis=1)
+        a_only["del_after_A"] = a_only.apply(count_deletions_after_A, axis=1)
 
-    if len(Bonly) > 0:
-        Bonly["del_before_B"] = Bonly.apply(compute_del_before_B, axis=1)
-        Bonly["del_after_B"] = Bonly.apply(compute_del_after_B, axis=1)
+    if len(b_only) > 0:
+        b_only["del_before_B"] = b_only.apply(count_deletions_before_B, axis=1)
+        b_only["del_after_B"] = b_only.apply(count_deletions_after_B, axis=1)
 
-    if len(BOTH) > 0:
-        BOTH["del_between"] = BOTH.apply(compute_del_between, axis=1)
+    if len(both_motifs) > 0:
+        both_motifs["del_between"] = both_motifs.apply(count_deletions_between, axis=1)
 
+    # Text summaries
     print("\n=== Deletion summaries (per sequence) ===")
     describe_series(
         "A_only: total deletions in sequence",
-        Aonly["del_total_calc"].to_numpy() if len(Aonly) else np.array([]),
+        a_only["del_total_calc"].to_numpy() if len(a_only) else np.array([]),
     )
     describe_series(
         "B_only: total deletions in sequence",
-        Bonly["del_total_calc"].to_numpy() if len(Bonly) else np.array([]),
+        b_only["del_total_calc"].to_numpy() if len(b_only) else np.array([]),
     )
     describe_series(
         "both: total deletions in sequence",
-        BOTH["del_total_calc"].to_numpy() if len(BOTH) else np.array([]),
+        both_motifs["del_total_calc"].to_numpy() if len(both_motifs) else np.array([]),
     )
     describe_series(
         "no_motif: total deletions in sequence",
         df[df["label"] == "no_motif"]["del_total_calc"].to_numpy(),
     )
 
-    if len(Aonly):
+    if len(a_only):
         describe_series(
             "A_only: deletions BEFORE motif A",
-            Aonly["del_before_A"].to_numpy(),
+            a_only["del_before_A"].to_numpy(),
         )
         describe_series(
             "A_only: deletions AFTER motif A",
-            Aonly["del_after_A"].to_numpy(),
+            a_only["del_after_A"].to_numpy(),
         )
-    if len(Bonly):
+    if len(b_only):
         describe_series(
             "B_only: deletions BEFORE motif B",
-            Bonly["del_before_B"].to_numpy(),
+            b_only["del_before_B"].to_numpy(),
         )
         describe_series(
             "B_only: deletions AFTER motif B",
-            Bonly["del_after_B"].to_numpy(),
+            b_only["del_after_B"].to_numpy(),
         )
-    if len(BOTH):
+    if len(both_motifs):
         describe_series(
             "both: deletions BETWEEN motif A and motif B",
-            BOTH["del_between"].dropna().to_numpy(),
+            both_motifs["del_between"].dropna().to_numpy(),
         )
 
+    # ----------------------------------------------------------------
     # Plots
+    # ----------------------------------------------------------------
+
+    # 1) label_counts.png
     fig, ax = plt.subplots()
     plot_bar(
         ax=ax,
@@ -376,16 +408,19 @@ def main() -> None:
         ylabel="Number of sequences",
     )
     plt.tight_layout()
+    save_figure(fig, "label_counts.png")
     plt.show()
 
-    L = int(df["length"].iloc[0])
-    pos_bins = np.arange(0, L + 1, 5)
+    # Binning for motif positions
+    seq_length = int(df["length"].iloc[0])
+    pos_bins = np.arange(0, seq_length + 1, 5)
 
-    if len(Aonly) and len(Bonly):
+    # 2) motif_positions_single.png
+    if len(a_only) and len(b_only):
         fig, ax = plt.subplots()
         plot_hist(
             ax=ax,
-            data=Aonly["posA"].astype(int),
+            data=a_only["posA"].astype(int),
             bins=pos_bins,
             color=CBF_COLORS["blue"],
             label="Motif A (A_only)",
@@ -395,20 +430,22 @@ def main() -> None:
         )
         plot_hist(
             ax=ax,
-            data=Bonly["posB"].astype(int),
+            data=b_only["posB"].astype(int),
             bins=pos_bins,
             color=CBF_COLORS["orange"],
             label="Motif B (B_only)",
         )
         ax.legend(title="Motif type")
         plt.tight_layout()
+        save_figure(fig, "motif_positions_single.png")
         plt.show()
 
-    if len(BOTH):
+    # 3) motif_positions_both.png
+    if len(both_motifs):
         fig, ax = plt.subplots()
         plot_hist(
             ax=ax,
-            data=BOTH["posA"].astype(int),
+            data=both_motifs["posA"].astype(int),
             bins=pos_bins,
             color=CBF_COLORS["green"],
             label="Motif A (both)",
@@ -418,15 +455,17 @@ def main() -> None:
         )
         plot_hist(
             ax=ax,
-            data=BOTH["posB"].astype(int),
+            data=both_motifs["posB"].astype(int),
             bins=pos_bins,
             color=CBF_COLORS["purple"],
             label="Motif B (both)",
         )
         ax.legend(title="Motif")
         plt.tight_layout()
+        save_figure(fig, "motif_positions_both.png")
         plt.show()
 
+    # 4) total_deletions_by_label.png
     fig, ax = plt.subplots()
     label_colors = {
         "both": CBF_COLORS["blue"],
@@ -452,18 +491,22 @@ def main() -> None:
     ax.set_title("Total deletions per sequence for each motif pattern")
     ax.legend(title="Motif pattern")
     plt.tight_layout()
+    save_figure(fig, "total_deletions_by_label.png")
     plt.show()
 
-    if len(Aonly):
+    # 5) A_only_before_after.png
+    if len(a_only):
         fig, ax = plt.subplots()
         bins_before = (
-            np.arange(Aonly["del_before_A"].min(), Aonly["del_before_A"].max() + 2) - 0.5
+            np.arange(a_only["del_before_A"].min(), a_only["del_before_A"].max() + 2)
+            - 0.5
         )
         bins_after = (
-            np.arange(Aonly["del_after_A"].min(), Aonly["del_after_A"].max() + 2) - 0.5
+            np.arange(a_only["del_after_A"].min(), a_only["del_after_A"].max() + 2)
+            - 0.5
         )
         ax.hist(
-            Aonly["del_before_A"],
+            a_only["del_before_A"],
             bins=bins_before,
             alpha=0.7,
             label="Before motif A",
@@ -471,7 +514,7 @@ def main() -> None:
             edgecolor="white",
         )
         ax.hist(
-            Aonly["del_after_A"],
+            a_only["del_after_A"],
             bins=bins_after,
             alpha=0.7,
             label="After motif A",
@@ -483,18 +526,22 @@ def main() -> None:
         ax.set_title("A_only sequences: deletions before vs after motif A")
         ax.legend()
         plt.tight_layout()
+        save_figure(fig, "A_only_before_after.png")
         plt.show()
 
-    if len(Bonly):
+    # 6) B_only_before_after.png
+    if len(b_only):
         fig, ax = plt.subplots()
         bins_before = (
-            np.arange(Bonly["del_before_B"].min(), Bonly["del_before_B"].max() + 2) - 0.5
+            np.arange(b_only["del_before_B"].min(), b_only["del_before_B"].max() + 2)
+            - 0.5
         )
         bins_after = (
-            np.arange(Bonly["del_after_B"].min(), Bonly["del_after_B"].max() + 2) - 0.5
+            np.arange(b_only["del_after_B"].min(), b_only["del_after_B"].max() + 2)
+            - 0.5
         )
         ax.hist(
-            Bonly["del_before_B"],
+            b_only["del_before_B"],
             bins=bins_before,
             alpha=0.7,
             label="Before motif B",
@@ -502,7 +549,7 @@ def main() -> None:
             edgecolor="white",
         )
         ax.hist(
-            Bonly["del_after_B"],
+            b_only["del_after_B"],
             bins=bins_after,
             alpha=0.7,
             label="After motif B",
@@ -514,10 +561,12 @@ def main() -> None:
         ax.set_title("B_only sequences: deletions before vs after motif B")
         ax.legend()
         plt.tight_layout()
+        save_figure(fig, "B_only_before_after.png")
         plt.show()
 
-    if len(BOTH):
-        between = BOTH["del_between"].dropna()
+    # 7) both_deletions_between.png
+    if len(both_motifs):
+        between = both_motifs["del_between"].dropna()
         fig, ax = plt.subplots()
         bins = np.arange(between.min(), between.max() + 2) - 0.5
         plot_hist(
@@ -530,26 +579,32 @@ def main() -> None:
             title="Deletions between motifs in sequences that contain both motifs",
         )
         plt.tight_layout()
+        save_figure(fig, "both_deletions_between.png")
         plt.show()
+
+    # ----------------------------------------------------------------
+    # CSV outputs
+    # ----------------------------------------------------------------
 
     out_dir = Path("/Users/amelielaura/Documents/Project6/data/out")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     counts.to_csv(out_dir / "label_counts.csv", index=False)
-    if len(Aonly):
-        Aonly[["id", "posA", "del_total_calc", "del_before_A", "del_after_A"]].to_csv(
+    if len(a_only):
+        a_only[["id", "posA", "del_total_calc", "del_before_A", "del_after_A"]].to_csv(
             out_dir / "A_only_stats.csv", index=False
         )
-    if len(Bonly):
-        Bonly[["id", "posB", "del_total_calc", "del_before_B", "del_after_B"]].to_csv(
+    if len(b_only):
+        b_only[["id", "posB", "del_total_calc", "del_before_B", "del_after_B"]].to_csv(
             out_dir / "B_only_stats.csv", index=False
         )
-    if len(BOTH):
-        BOTH[["id", "posA", "posB", "gap", "del_total_calc", "del_between"]].to_csv(
-            out_dir / "both_stats.csv", index=False
-        )
+    if len(both_motifs):
+        both_motifs[
+            ["id", "posA", "posB", "gap", "del_total_calc", "del_between"]
+        ].to_csv(out_dir / "both_stats.csv", index=False)
 
     print(f"\nAll CSV summaries have been saved in: {out_dir.resolve()}")
+    print(f"Finito! All plots saved in: {PLOT_DIR.resolve()}")
 
 
 if __name__ == "__main__":
