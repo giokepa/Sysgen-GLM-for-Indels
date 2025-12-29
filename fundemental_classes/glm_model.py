@@ -43,8 +43,8 @@ class GLMModel:
         config = BertConfig(
         vocab_size=10,
         hidden_size=256,
-        num_hidden_layers=6,
-        num_attention_heads=6,
+        num_hidden_layers=8,
+        num_attention_heads=8,
         intermediate_size=1536,
         max_position_embeddings=512,
         type_vocab_size=1,
@@ -63,6 +63,8 @@ class GLMModel:
             eval_steps=500,
             log_level="info",
             logging_first_step=True,
+            eval_strategy="steps",
+            save_strategy="steps",
             report_to="all",
             load_best_model_at_end=True, # take best model instead of last model to avoid overfitting
             metric_for_best_model="eval_loss",
