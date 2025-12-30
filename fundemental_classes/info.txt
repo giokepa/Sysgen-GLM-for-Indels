@@ -1,0 +1,34 @@
+Project6/
+  data/
+    augumented_sequence_size10000_length150_deletions0.1_nodeletionseq0.25.fasta
+  lib/
+    __init__.py
+    glm_model_new.py
+    dna_dataset.py
+    sequence_plotter.py
+  scripts/
+    train_glm_local.py
+    eval_glm_local.py
+  outputs/
+    (created automatically)
+  model_out/
+    (created automatically by training)
+requirements.txt
+
+cd /Users/amelie.laura/Documents/Project6
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+pip3 install -r requirements.txt
+
+python3 --version
+# must be Python 3.x
+
+pip3 install torchvision
+pip3 install "accelerate>=0.26.0"
+
+pip3 install -U accelerate
+
+cd /Users/amelielaura/Documents/Project6
+python3 train_glm_local.py
+python3 eval_glm_local.py
