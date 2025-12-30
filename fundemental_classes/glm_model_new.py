@@ -6,6 +6,7 @@ from typing import Optional, Tuple, Dict, Any, List
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.utils.data import Subset, random_split
 
 from transformers import (
    BertForMaskedLM,
@@ -17,26 +18,23 @@ from transformers import (
 )
 
 from tokenizers import Tokenizer, models, pre_tokenizers
-
 from dna_dataset import DNADataset
 
 
 class GLMModel:
    """
+   DNA Masked Language Model (MLM) wrapper.
 
-   This is a DNA Masked Language Model (MLM) wrapper.
-
-   It supports:
-     (A) Training a small BERT-style MLM on DNA tokens (A,C,G,T, '-') using Georgi’s training approach.
-     (B) Reconstructing sequences position-by-position (mask one position and predict probabilities).
-     (C) Evaluating the effect of deletions using two new scores:
-         1) A FAST "global disruption" score (delta_likelihood_fast)
-         2) A slower but more informative "probability shift / influence" score (influence_probability_shift)
-
-   Important:
-     - Right now we only do deletions. That means: ref and alt must have equal length.
-     - Deletions are encoded using '-' so the sequences stay aligned.
+   Supports:
+     1) Training with TRAIN/VAL split (saved for reproducibility)
+     2) Reconstruction probabilities (mask each position)
+     3) Two deletion-effect scores:
+        - Method 1: delta_likelihood_fast (global plausibility change)
+        - Method 2: influence_probability_shift (distribution shift across positions)
+     4) Model quality on VAL (MLM loss + perplexity)
    """
+
+   SPLIT_FILE = "split_indices.npz"
 
    def __init__(self, model_path: str, fasta_file: str, max_seq_length: int = 122):
        self.model_path = model_path
@@ -44,21 +42,32 @@ class GLMModel:
        self.relevant_chars = ["A", "C", "G", "T", "-"]
        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-       # 1) Tokenizer
-       # If model_path contains a saved tokenizer, load it.
-       # Otherwise create a minimal tokenizer and (optionally) save it.
-       if os.path.isdir(model_path) and any(
-           os.path.exists(os.path.join(model_path, f)) for f in ["tokenizer.json", "tokenizer_config.json", "vocab.json"]
+       # --- Tokenizer ---
+       if os.path.isdir(model_path) and (
+           os.path.exists(os.path.join(model_path, "tokenizer.json"))
+           or os.path.exists(os.path.join(model_path, "tokenizer_config.json"))
        ):
            self.tokenizer = PreTrainedTokenizerFast.from_pretrained(model_path)
        else:
            self.tokenizer = self.create_tokenizer(save_dir=model_path)
 
-       # 2) Dataset
+       # Make sure special tokens exist (sometimes HF loads but mask_token is None)
+       if self.tokenizer.mask_token is None:
+           # The token exists in vocab; just set the attribute.
+           self.tokenizer.mask_token = "[MASK]"
+       if self.tokenizer.cls_token is None:
+           self.tokenizer.cls_token = "[CLS]"
+       if self.tokenizer.sep_token is None:
+           self.tokenizer.sep_token = "[SEP]"
+       if self.tokenizer.pad_token is None:
+           self.tokenizer.pad_token = "[PAD]"
+       if self.tokenizer.unk_token is None:
+           self.tokenizer.unk_token = "[UNK]"
+
+       # --- Dataset ---
        self.dataset = DNADataset(fasta_file, self.tokenizer, max_seq_length)
 
-       # 3) Model
-       # If model files exist, load them. Otherwise set to None and expect train() later.
+       # --- Model ---
        if os.path.isdir(model_path) and (
            os.path.exists(os.path.join(model_path, "pytorch_model.bin"))
            or os.path.exists(os.path.join(model_path, "model.safetensors"))
@@ -68,74 +77,132 @@ class GLMModel:
        else:
            self.model = None
 
-   # ---------------------------------------------------------------------
-   # Helper: require a trained model
-   # ---------------------------------------------------------------------
+   # -------------------------
+   # Split handling (TRAIN/VAL)
+   # -------------------------
+   def _split_path(self) -> str:
+       return os.path.join(self.model_path, self.SPLIT_FILE)
+
+   def ensure_split(self, seed: int = 727, val_ratio: float = 0.2) -> Dict[str, np.ndarray]:
+       """
+       Create or load a train/val split.
+       Stored in: model_out/split_indices.npz
+       """
+       os.makedirs(self.model_path, exist_ok=True)
+       split_path = self._split_path()
+
+       if os.path.exists(split_path):
+           data = np.load(split_path)
+           return {"train_idx": data["train_idx"], "val_idx": data["val_idx"]}
+
+       n_total = len(self.dataset)
+       idxs = np.arange(n_total)
+       rng = np.random.default_rng(seed)
+       rng.shuffle(idxs)
+
+       n_val = int(n_total * val_ratio)
+       val_idx = np.sort(idxs[:n_val])
+       train_idx = np.sort(idxs[n_val:])
+
+       np.savez(split_path, train_idx=train_idx, val_idx=val_idx)
+       return {"train_idx": train_idx, "val_idx": val_idx}
+
+   def get_split_indices(self) -> Dict[str, np.ndarray]:
+       """
+       For compatibility with our eval script.
+       """
+       split_path = self._split_path()
+       if not os.path.exists(split_path):
+           raise RuntimeError(
+               f"No split indices stored yet at {split_path}.\n"
+               f"Run training once (train_glm_local.py) to create them."
+           )
+       data = np.load(split_path)
+       return {"train_idx": data["train_idx"], "val_idx": data["val_idx"]}
+
+   # -------------------------
+   # Train
+   # -------------------------
    def _require_model(self):
        if self.model is None:
            raise RuntimeError(
                f"No trained model found in '{self.model_path}'.\n"
-               f"Our folder must contain a trained checkpoint (pytorch_model.bin or model.safetensors).\n"
-               f"Fix: call glm.train(...) first, or point model_path to the folder that already has the trained model."
+               f"Train first so model_out contains pytorch_model.bin/model.safetensors."
            )
 
-   # ---------------------------------------------------------------------
-   # TRAINING
-   # ---------------------------------------------------------------------
-   def train(self, epochs: int = 30, batch_size: int = 16, lr: float = 2e-4):
+   def _make_training_args(self, **kwargs):
        """
-       Train a small BERT-style masked language model (MLM) on the FASTA sequences.
-
-       What gets written into model_path:
-         - pytorch_model.bin (or safetensors)
-         - tokenizer files
-         - trainer logs (optional)
-
-       After training, self.model is ready for scoring/evaluation.
+       Transformers versions differ: some use evaluation_strategy, some eval_strategy.
+       We try one, and if TypeError occurs, we swap.
        """
+       try:
+           return TrainingArguments(**kwargs)
+       except TypeError as e:
+           msg = str(e)
+           if "evaluation_strategy" in msg and "unexpected keyword" in msg:
+               kwargs["eval_strategy"] = kwargs.pop("evaluation_strategy")
+               return TrainingArguments(**kwargs)
+           raise
+
+   def train(
+       self,
+       epochs: int = 30,
+       batch_size: int = 16,
+       lr: float = 2e-4,
+       seed: int = 727,
+       val_ratio: float = 0.2
+   ):
        os.makedirs(self.model_path, exist_ok=True)
 
+       # split indices (saved)
+       split = self.ensure_split(seed=seed, val_ratio=val_ratio)
+       train_ds = Subset(self.dataset, split["train_idx"].tolist())
+       val_ds = Subset(self.dataset, split["val_idx"].tolist())
+
        data_collator = DataCollatorForLanguageModeling(
-           tokenizer=self.tokenizer,
-           mlm=True,
-           mlm_probability=0.15
+           tokenizer=self.tokenizer, mlm=True, mlm_probability=0.15
        )
 
-       # small-ish model
        config = BertConfig(
            vocab_size=len(self.tokenizer.get_vocab()),
            hidden_size=256,
-           num_hidden_layers=4,
-           num_attention_heads=4,
-           intermediate_size=512,
+           num_hidden_layers=8,
+           num_attention_heads=8,
+           intermediate_size=1536,
            max_position_embeddings=512,
-           type_vocab_size=1
+           type_vocab_size=1,
        )
-
        model = BertForMaskedLM(config)
 
-       args = TrainingArguments(
+       args = self._make_training_args(
            output_dir=self.model_path,
            overwrite_output_dir=True,
            num_train_epochs=epochs,
            per_device_train_batch_size=batch_size,
-           save_steps=1000,
-           logging_steps=50,
+           per_device_eval_batch_size=batch_size,
+           save_steps=500,
+           logging_steps=200,
+           evaluation_strategy="steps",
+           eval_steps=500,
+           save_strategy="steps",
+           load_best_model_at_end=True,
+           metric_for_best_model="eval_loss",
            report_to="none",
            learning_rate=lr,
            warmup_steps=100,
            dataloader_pin_memory=False,
-           disable_tqdm=False
+           disable_tqdm=False,
        )
 
        trainer = Trainer(
            model=model,
            args=args,
-           train_dataset=self.dataset,
-           data_collator=data_collator
+           train_dataset=train_ds,
+           eval_dataset=val_ds,
+           data_collator=data_collator,
        )
 
-       print("Starting training...")
+       print("Starting training (train/val split saved in model_out)...")
        trainer.train()
 
        trainer.save_model(self.model_path)
@@ -143,81 +210,58 @@ class GLMModel:
 
        self.model = model.to(self.device)
        self.model.eval()
+       print("Training complete! Saved to:", self.model_path)
 
-       print("Training complete! Saved model to:", self.model_path)
-
-   # ---------------------------------------------------------------------
-   # STEP 2 "model quality" score: MLM loss/perplexity on held-out sequences
-   # ---------------------------------------------------------------------
-   def evaluate_mlm_quality(
+   # -------------------------
+   # Model quality on VAL
+   # -------------------------
+   def evaluate_mlm_quality_on_val(
        self,
        n_samples: int = 500,
        mlm_probability: float = 0.15,
        seed: int = 0
    ) -> Dict[str, float]:
        """
-
-       This is NOT a deletion score. This is a check:
-       "Is the masked language model itself learning something reasonable?"
-
-       We take a subset of sequences, apply random masking (like during training),
-       and compute MLM loss. Lower loss (and lower perplexity) is better.
-
-       This helps us compare:
-         - our model vs another model
-         - model versions across runs
+       Overall model quality score (NOT deletion score):
+       MLM loss + perplexity on VAL subset.
        """
        self._require_model()
-       random.seed(seed)
+       split = self.get_split_indices()
+       val_idx = split["val_idx"].tolist()
+
+       rng = random.Random(seed)
+       rng.shuffle(val_idx)
+       val_idx = val_idx[: min(n_samples, len(val_idx))]
 
        data_collator = DataCollatorForLanguageModeling(
-           tokenizer=self.tokenizer,
-           mlm=True,
-           mlm_probability=mlm_probability
+           tokenizer=self.tokenizer, mlm=True, mlm_probability=mlm_probability
        )
 
-       # pick random sequences
-       idxs = list(range(len(self.dataset)))
-       random.shuffle(idxs)
-       idxs = idxs[: min(n_samples, len(idxs))]
-
-       losses = []
-
        self.model.eval()
+       losses = []
        with torch.no_grad():
-           for i in idxs:
-               item = self.dataset[i]
-               # collator expects a list of dicts
+           for idx in val_idx:
+               item = self.dataset[idx]
                batch = data_collator([item])
                batch = {k: v.to(self.device) for k, v in batch.items()}
-
                out = self.model(**batch)
-               loss = float(out.loss.item())
-               losses.append(loss)
+               losses.append(float(out.loss.item()))
 
        mean_loss = float(np.mean(losses)) if losses else float("nan")
        ppl = float(math.exp(mean_loss)) if (losses and mean_loss < 50) else float("nan")
 
-       return {"mlm_loss": mean_loss, "perplexity": ppl, "n_samples": len(losses)}
+       return {"val_mlm_loss": mean_loss, "val_perplexity": ppl, "n_samples": len(losses)}
 
-   # ---------------------------------------------------------------------
-   # Reconstruction helper (mask one position)
-   # ---------------------------------------------------------------------
+   # -------------------------
+   # Reconstruction helpers
+   # -------------------------
    def predict_position(self, sequence: str, position: int) -> np.ndarray:
-       """
-       Mask ONE position in the sequence and return the full probability distribution
-       over the vocabulary at that masked position.
-       """
        self._require_model()
-
        s = list(sequence)
        s[position] = "[MASK]"
        masked = "".join(s)
 
        inputs = self.tokenizer(masked, return_tensors="pt").to(self.device)
-
-       # token positions: [CLS] + seq + [SEP]
-       # our earlier logic used position+1, keep consistent
        mask_token_position = min(position + 1, inputs.input_ids.shape[1] - 2)
 
        with torch.no_grad():
@@ -227,14 +271,7 @@ class GLMModel:
        return probs.detach().cpu().numpy()
 
    def get_full_reconstruction_probs(self, sequence_to_evaluate: str) -> np.ndarray:
-       """
-       For every position i:
-         - mask i
-         - ask the model for p(A), p(C), p(G), p(T), p('-')
-       Returns an (L x 5) matrix.
-       """
        self._require_model()
-
        seq_len = len(sequence_to_evaluate)
        char_to_id = {c: self.tokenizer.vocab[c] for c in self.relevant_chars}
        prob_matrix = np.zeros((seq_len, len(self.relevant_chars)), dtype=float)
@@ -246,32 +283,15 @@ class GLMModel:
 
        return prob_matrix
 
-   # ---------------------------------------------------------------------
-   # NEW METHOD 1: FAST global delta-likelihood-ish score (no masking)
-   # ---------------------------------------------------------------------
+   # -------------------------
+   # Method 1: delta_likelihood_fast
+   # -------------------------
    def delta_likelihood_fast(
        self,
        reference_sequence: str,
        perturbed_sequence: str,
        region: Optional[Tuple[int, int]] = None
    ) -> Dict[str, Any]:
-       """
-       We want one quick number:
-         "Does the model like the perturbed (deleted) sequence less than the reference?"
-
-       We do:
-         - run model once on ref
-         - run model once on alt
-         - at each position, take log prob of the observed token
-         - sum over positions
-
-       Then:
-         delta = sum_logp(alt) - sum_logp(ref)
-
-       Interpretation:
-         delta << 0  : deletion made the sequence look much less plausible to the model
-         delta ~ 0   : deletion barely changed global plausibility
-       """
        self._require_model()
 
        if len(reference_sequence) != len(perturbed_sequence):
@@ -290,17 +310,15 @@ class GLMModel:
        alt_inputs = self.tokenizer(perturbed_sequence, return_tensors="pt").to(self.device)
 
        with torch.no_grad():
-           ref_logits = self.model(**ref_inputs).logits[0]  # (token_len, vocab)
+           ref_logits = self.model(**ref_inputs).logits[0]
            alt_logits = self.model(**alt_inputs).logits[0]
 
        ref_logp = F.log_softmax(ref_logits, dim=-1)
        alt_logp = F.log_softmax(alt_logits, dim=-1)
 
-       # string pos -> token pos (shift by 1 because of [CLS])
        tok_start = start + 1
        tok_end = end + 1
 
-       # avoid [SEP]
        max_token_index = ref_inputs.input_ids.shape[1] - 2
        tok_start = max(1, min(tok_start, max_token_index))
        tok_end = max(tok_start, min(tok_end, max_token_index + 1))
@@ -320,9 +338,9 @@ class GLMModel:
            "region": (start, end)
        }
 
-   # ---------------------------------------------------------------------
-   # NEW METHOD 2: Influence / probability shift score (mask targets)
-   # ---------------------------------------------------------------------
+   # -------------------------
+   # Method 2: influence_probability_shift
+   # -------------------------
    def influence_probability_shift(
        self,
        reference_sequence: str,
@@ -333,40 +351,14 @@ class GLMModel:
        reduce: str = "mean",
        eps: float = 1e-9
    ) -> Dict[str, Any]:
-       """
-
-       This is the "Pedro-inspired" idea:
-
-       If we introduce a deletion (ref -> alt),
-       the model's predicted distribution at many positions can shift.
-
-       We measure:
-         For each target position j in some window:
-           - mask j in ref, get p_ref(A,C,G,T,'-')
-           - mask j in alt, get p_alt(A,C,G,T,'-')
-           - compute how much the distribution moved
-
-       metric options:
-         - max_abs_logodds : max |log p_alt(v) - log p_ref(v)|
-         - kl_ref_alt      : KL(p_ref || p_alt)
-         - tv              : 0.5 * sum |p_alt - p_ref|
-
-       reduce:
-         - "mean" or "sum" across targets per query
-
-       final influence_score:
-         sum of query scores
-       """
        self._require_model()
 
        if len(reference_sequence) != len(perturbed_sequence):
            raise ValueError("ref and alt must have the same length (use '-' for deletions).")
 
-       # default queries: all positions that changed (where alt has '-' but ref doesn't)
        if query_positions is None:
            query_positions = [i for i, (a, b) in enumerate(zip(reference_sequence, perturbed_sequence)) if a != b]
 
-       # targets: either full sequence or a window
        if target_window is None:
            t0, t1 = 0, len(reference_sequence)
        else:
@@ -377,7 +369,6 @@ class GLMModel:
                raise ValueError("target_window must satisfy end > start")
 
        targets = list(range(t0, t1))
-
        relevant_ids = torch.tensor([self.tokenizer.vocab[c] for c in self.relevant_chars], device=self.device)
 
        def masked_probs(seq: str, j: int) -> torch.Tensor:
@@ -403,24 +394,17 @@ class GLMModel:
            raise ValueError(f"Unknown metric: {metric}")
 
        total = 0.0
-       per_query = []
-
        for q in query_positions:
-           per_target_scores = []
+           per_target = []
            for j in targets:
                if j == q:
                    continue
                p_ref = masked_probs(reference_sequence, j)
                p_alt = masked_probs(perturbed_sequence, j)
-               per_target_scores.append(float(shift_score(p_ref, p_alt).item()))
+               per_target.append(float(shift_score(p_ref, p_alt).item()))
 
-           if len(per_target_scores) == 0:
-               q_score = 0.0
-           else:
-               q_score = float(np.mean(per_target_scores)) if reduce == "mean" else float(np.sum(per_target_scores))
-
+           q_score = float(np.mean(per_target)) if (per_target and reduce == "mean") else float(np.sum(per_target)) if per_target else 0.0
            total += q_score
-           per_query.append({"query_pos": int(q), "score": q_score})
 
        return {
            "influence_score": float(total),
@@ -428,20 +412,13 @@ class GLMModel:
            "target_window": (t0, t1),
            "metric": metric,
            "reduce": reduce,
-           "per_query": per_query
        }
 
-   # ---------------------------------------------------------------------
+   # -------------------------
    # Tokenizer
-   # ---------------------------------------------------------------------
+   # -------------------------
    @staticmethod
    def create_tokenizer(save_dir: Optional[str] = None) -> PreTrainedTokenizerFast:
-       """
-       Minimal tokenizer for single-character DNA tokens plus '-'.
-
-       If save_dir is provided, we store tokenizer.json there,
-       so later GLMModel(...) can load it again.
-       """
        vocab = {
            "[PAD]": 0,
            "[UNK]": 1,
@@ -458,19 +435,19 @@ class GLMModel:
        tok = Tokenizer(models.WordLevel(vocab=vocab, unk_token="[UNK]"))
        tok.pre_tokenizer = pre_tokenizers.Split(pattern="", behavior="isolated")
 
-       # save a local tokenizer.json
-       tokenizer_path = "tokenizer.json"
        if save_dir is not None:
            os.makedirs(save_dir, exist_ok=True)
-           tokenizer_path = os.path.join(save_dir, "tokenizer.json")
+           path = os.path.join(save_dir, "tokenizer.json")
+       else:
+           path = "tokenizer.json"
 
-       tok.save(tokenizer_path)
+       tok.save(path)
 
        return PreTrainedTokenizerFast(
-           tokenizer_file=tokenizer_path,
+           tokenizer_file=path,
            unk_token="[UNK]",
            sep_token="[SEP]",
            pad_token="[PAD]",
            cls_token="[CLS]",
-           mask_token="[MASK]"
+           mask_token="[MASK]",
        )
