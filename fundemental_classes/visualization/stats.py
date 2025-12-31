@@ -1,35 +1,3 @@
-"""
-What this script does
----------------------
-
-1) Reads a FASTA file where each header line contains:
-   - A label describing which motifs are present
-   - The positions of the motifs (posAmotif, posBmotif)
-   - The gap length between motifs
-   - The total number of deletions reported in the header
-
-2) Counts how many sequences fall into each label:
-   - both
-   - A_only
-   - B_only
-   - no_motif
-
-3) For A_only and B_only:
-   - Distribution of motif start positions
-   - Total deletions per sequence
-   - Deletions BEFORE and AFTER the motif
-     (to see where deletions tend to cluster along the sequence)
-
-4) For both:
-   - Start position distributions for motif A and motif B
-   - Total deletions per sequence
-   - Deletions BETWEEN motifs
-     (from the end of motif A to the start of motif B)
-
-Run:
-   python3 stats.py
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,20 +6,6 @@ from typing import Any, Dict, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-
-# -------------------------------------------------------------------
-# Configuration
-# -------------------------------------------------------------------
-# Input FASTA (augmented sequences with deletions encoded as "-")
-FASTA = Path(
-    "/Users/amelielaura/Documents/Project6/data/"
-    "augumented_sequence_size10000_length150_deletions0.1_nodeletionseq0.25.fasta"
-)
-
-# Output locations
-OUT_DIR = Path("/Users/amelielaura/Documents/Project6/data/out")         # CSVs
-PLOT_DIR = Path("/Users/amelielaura/Documents/Project6/plotresults")    # plots
 
 # Motif definitions
 MOTIF_A = "ATATTCA"
@@ -99,12 +53,6 @@ def friendly_style() -> None:
     )
 
 
-friendly_style()
-
-
-# -------------------------------------------------------------------
-# FASTA parsing
-# -------------------------------------------------------------------
 def parse_header(header_line: str) -> Dict[str, Any]:
     """
     Parse a FASTA header line that encodes motif metadata.
@@ -171,9 +119,6 @@ def read_fasta_with_metadata(path: Path) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-# -------------------------------------------------------------------
-# Deletion helpers
-# -------------------------------------------------------------------
 def deletions_before_motif(sequence: str, motif_start: int) -> int:
     """Count how many deletions occur before a motif start."""
     return sequence[:motif_start].count("-")
@@ -201,9 +146,6 @@ def deletions_between_motifs(sequence: str, pos_a: int, pos_b: int) -> float:
     return float(sequence[start:end].count("-"))
 
 
-# -------------------------------------------------------------------
-# Text summary helper
-# -------------------------------------------------------------------
 def describe_series(label: str, values: np.ndarray) -> None:
     """Print a numeric summary."""
     if values.size == 0:
@@ -222,19 +164,28 @@ def describe_series(label: str, values: np.ndarray) -> None:
     print(f"  Range (min–max)  : {min_val:.3f} – {max_val:.3f}")
 
 
-# -------------------------------------------------------------------
-# Main analysis
-# -------------------------------------------------------------------
-def main() -> None:
-    # Basic checks and directory setup
-    if not FASTA.exists():
-        raise FileNotFoundError(f"FASTA file not found at: {FASTA}")
+def analyze_motifs_and_deletions(fasta_path, out_dir):
+    """
+    Analyze sequences from a FASTA file for motif patterns and deletion statistics.
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    PLOT_DIR.mkdir(parents=True, exist_ok=True)
+    Parameters:
+        fasta_path: Path to the FASTA file (string or Path object)
+        out_dir: Directory where CSV outputs will be saved
+        plot_dir: Directory where plot will be saved
+    """
+    fasta_path = Path(fasta_path)
+    out_dir = Path(out_dir)
+
+    friendly_style()
+
+    # Basic checks and directory setup
+    if not fasta_path.exists():
+        raise FileNotFoundError(f"FASTA file not found at: {fasta_path}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Read sequences + metadata
-    df = read_fasta_with_metadata(FASTA)
+    df = read_fasta_with_metadata(fasta_path)
 
     # Core derived columns
     df["sequence_length"] = df["seq"].str.len()
@@ -313,7 +264,7 @@ def main() -> None:
     ).copy()
     both_valid = both_valid[
         both_valid["position_of_motif_A"] < both_valid["position_of_motif_B"]
-    ]
+        ]
 
     if len(both_valid) > 0:
         both_valid["del_between"] = both_valid.apply(
@@ -379,7 +330,7 @@ def main() -> None:
         )
 
     # ---------------- Save CSVs ----------------
-    counts.to_csv(OUT_DIR / "label_counts.csv", index=False)
+    counts.to_csv(out_dir / "label_counts.csv", index=False)
 
     if len(only_a):
         only_a[
@@ -390,7 +341,7 @@ def main() -> None:
                 "del_before_A",
                 "del_after_A",
             ]
-        ].to_csv(OUT_DIR / "A_only_stats.csv", index=False)
+        ].to_csv(out_dir / "A_only_stats.csv", index=False)
     else:
         pd.DataFrame(
             columns=[
@@ -400,7 +351,7 @@ def main() -> None:
                 "del_before_A",
                 "del_after_A",
             ]
-        ).to_csv(OUT_DIR / "A_only_stats.csv", index=False)
+        ).to_csv(out_dir / "A_only_stats.csv", index=False)
 
     if len(only_b):
         only_b[
@@ -411,7 +362,7 @@ def main() -> None:
                 "del_before_B",
                 "del_after_B",
             ]
-        ].to_csv(OUT_DIR / "B_only_stats.csv", index=False)
+        ].to_csv(out_dir / "B_only_stats.csv", index=False)
     else:
         pd.DataFrame(
             columns=[
@@ -421,7 +372,7 @@ def main() -> None:
                 "del_before_B",
                 "del_after_B",
             ]
-        ).to_csv(OUT_DIR / "B_only_stats.csv", index=False)
+        ).to_csv(out_dir / "B_only_stats.csv", index=False)
 
     if len(both_valid):
         both_valid[
@@ -433,7 +384,7 @@ def main() -> None:
                 "total_deletions_per_sequence",
                 "del_between",
             ]
-        ].to_csv(OUT_DIR / "both_stats.csv", index=False)
+        ].to_csv(out_dir / "both_stats.csv", index=False)
     else:
         pd.DataFrame(
             columns=[
@@ -444,7 +395,7 @@ def main() -> None:
                 "total_deletions_per_sequence",
                 "del_between",
             ]
-        ).to_csv(OUT_DIR / "both_stats.csv", index=False)
+        ).to_csv(out_dir / "both_stats.csv", index=False)
 
     # ---------------- 4 plots in one figure ----------------
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
@@ -595,18 +546,14 @@ def main() -> None:
     )
     fig.tight_layout()
 
-    out_png = PLOT_DIR / "summary_4plots.png"
+    out_png = out_dir / "summary_4plots.png"
     fig.savefig(out_png, dpi=220, bbox_inches="tight")
     plt.show()
 
     # Final paths printout
     print(f"\nSaved figure: {out_png}")
-    print(f"Saved CSVs in: {OUT_DIR.resolve()}")
+    print(f"Saved CSVs in: {out_dir.resolve()}")
     print(" - label_counts.csv")
     print(" - A_only_stats.csv")
     print(" - B_only_stats.csv")
     print(" - both_stats.csv")
-
-
-if __name__ == "__main__":
-    main()

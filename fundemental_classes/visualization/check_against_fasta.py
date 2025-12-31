@@ -1,13 +1,5 @@
 import os
 
-PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
-FASTA_PATH = os.path.join(
-    PROJECT_ROOT,
-    "data",
-    "augumented_sequence_size10000_length150_deletions0.1_nodeletionseq0.25.fasta"
-)
-PLOTS_DIR = os.path.join(PROJECT_ROOT, "outputs", "plots")
-
 def load_fasta(fasta_path):
     headers, seqs = [], []
     with open(fasta_path) as f:
@@ -30,10 +22,10 @@ def load_fasta(fasta_path):
             seqs.append("".join(seq))
     return headers, seqs
 
-def main():
-    headers, seqs = load_fasta(FASTA_PATH)
+def analyze_sequences(fasta_path, out_plots_dir):
+    headers, seqs = load_fasta(fasta_path)
 
-    plot_files = os.listdir(PLOTS_DIR)
+    plot_files = os.listdir(out_plots_dir)
     indices = sorted(
         {int(f.split("_")[1].split(".")[0]) for f in plot_files if f.startswith(("ref_", "alt_"))}
     )
@@ -50,6 +42,3 @@ def main():
         print(f"  Length: {len(seq)}")
         print(f"  Contains '-' in FASTA: {has_deletion}")
         print()
-
-if __name__ == "__main__":
-    main()
