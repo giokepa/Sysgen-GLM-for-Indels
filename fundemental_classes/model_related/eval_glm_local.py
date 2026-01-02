@@ -3,7 +3,7 @@ import random
 import csv
 
 from glm_model_new import GLMModel
-from sequence_plotter import SequenceLogoPlotter
+from fundemental_classes.visualization.sequence_plotter import SequenceLogoPlotter
 
 PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
 
@@ -16,7 +16,8 @@ MODEL_OUT = os.path.join(PROJECT_ROOT, "model_out")
 
 OUT_SCORES = os.path.join(PROJECT_ROOT, "outputs", "scores", "scores.csv")
 OUT_PLOTS_DIR = os.path.join(PROJECT_ROOT, "outputs", "plots")
-OUT_SEQS_DIR = os.path.join(PROJECT_ROOT, "outputs", "plot_sequences")  # <-- NEW
+OUT_SEQS_DIR = os.path.join(PROJECT_ROOT, "outputs", "plot_sequences")
+
 
 def make_deletion_alt(ref_seq: str, deletion_rate: float = 0.10) -> str:
    s = list(ref_seq)
@@ -25,11 +26,8 @@ def make_deletion_alt(ref_seq: str, deletion_rate: float = 0.10) -> str:
            s[i] = "-"
    return "".join(s)
 
+
 def save_plot_sequence(index, header, ref, alt):
-   """
-   Save the exact sequences used for a plot (so you can always trace back later).
-   Writes one text file per plotted example.
-   """
    os.makedirs(OUT_SEQS_DIR, exist_ok=True)
    out_txt = os.path.join(OUT_SEQS_DIR, f"seq_{index}.txt")
 
@@ -43,6 +41,7 @@ def save_plot_sequence(index, header, ref, alt):
 
    return out_txt
 
+
 def main():
    os.makedirs(os.path.dirname(OUT_SCORES), exist_ok=True)
    os.makedirs(OUT_PLOTS_DIR, exist_ok=True)
@@ -51,33 +50,39 @@ def main():
    glm = GLMModel(model_path=MODEL_OUT, fasta_file=FASTA_PATH, max_seq_length=256)
    plotter = SequenceLogoPlotter()
 
+   # ---- IMPORTANT: use VAL split (not training set) ----
+   split = glm.get_split_indices()
+   val_idx = split["val_idx"].tolist()
+
    headers = glm.dataset.headers
    seqs = glm.dataset.seqs
 
-   # Use clean sequences (no '-') as reference
-   clean_idx = [i for i, s in enumerate(seqs) if "-" not in s]
-   if not clean_idx:
-       raise RuntimeError("No clean sequences found. Need some sequences without '-' as reference.")
+   # Use clean sequences (no '-') as reference candidates from VAL
+   clean_val_idx = [i for i in val_idx if "-" not in seqs[i]]
+   if not clean_val_idx:
+       raise RuntimeError("No clean sequences found in VAL. Need some sequences without '-' as reference.")
 
-   random.shuffle(clean_idx)
+   random.shuffle(clean_val_idx)
 
-   n_eval = min(200, len(clean_idx))   # increase later
-   n_plots = 5                         # just a few for testing
+   # optional: overall model quality score (VAL)
+   quality = glm.evaluate_mlm_quality_on_val(n_samples=500)
+   val_loss = quality["val_mlm_loss"]
+   val_ppl = quality["val_perplexity"]
+
+   n_eval = min(200, len(clean_val_idx))
+   n_plots = 5
 
    rows = []
    for k in range(n_eval):
-       i = clean_idx[k]
+       i = clean_val_idx[k]
        header = headers[i]
        ref = seqs[i]
        alt = make_deletion_alt(ref, deletion_rate=0.10)
 
-       # Method 1
        delta_fast = glm.delta_likelihood_fast(ref, alt)["delta"]
-
-       # Method 2
        infl = glm.influence_probability_shift(ref, alt)["influence_score"]
 
-       rows.append([i, header, delta_fast, infl])
+       rows.append([i, header, delta_fast, infl, val_loss, val_ppl])
 
        if k < n_plots:
            probs_ref = glm.get_full_reconstruction_probs(ref)
@@ -98,13 +103,14 @@ def main():
 
    with open(OUT_SCORES, "w", newline="") as f:
        w = csv.writer(f)
-       w.writerow(["index", "header", "delta_fast", "influence_score"])
+       w.writerow(["index", "header", "delta_fast", "influence_score", "val_mlm_loss", "val_perplexity"])
        w.writerows(rows)
 
    print("Done.")
    print("Scores:", OUT_SCORES)
    print("Plots:", OUT_PLOTS_DIR)
    print("Plotted sequences:", OUT_SEQS_DIR)
+
 
 if __name__ == "__main__":
    main()
