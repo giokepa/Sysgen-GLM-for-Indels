@@ -2,7 +2,7 @@ import os
 import random
 import csv
 
-from glm_model_new import GLMModel
+from fundemental_classes.glm_model2 import GLMModel
 from fundemental_classes.visualization.sequence_plotter import SequenceLogoPlotter
 
 PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
