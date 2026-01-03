@@ -1,7 +1,7 @@
 import os
 import csv
 
-from glm_model_new import GLMModel
+from fundemental_classes.glm_model2 import GLMModel
 
 PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
 
