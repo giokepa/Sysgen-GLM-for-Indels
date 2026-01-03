@@ -3,7 +3,7 @@ import torch
 import json
 import shutil
 from tokenizers import Tokenizer, models, pre_tokenizers
-from fundemental_classes.dna_dataset import DNADataset
+from fundemental_classes.dna_dataset import DNADataset 
 import os
 from transformers import (
     BertForMaskedLM,
