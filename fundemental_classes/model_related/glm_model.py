@@ -17,12 +17,14 @@ from torch.utils.data import random_split
 
 
 class GLMModel:
-    def __init__(self, model_path, fasta_file, max_seq_length=122, force_retrain=False):
+    def __init__(self, model_path, fasta_file, max_seq_length=150, force_retrain=False):
         self.model_path = model_path
         self.meta_path = os.path.join(model_path, "training_metadata.json")
         self.max_length = max_seq_length
         self.relevant_chars = ['A', 'C', 'G', 'T', '-']
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.add_special_tokens = False
 
         if force_retrain:
             print(f"force_retrain=True: Clearing all model files")
@@ -35,7 +37,8 @@ class GLMModel:
         if not load_success:
             print("Initializing fresh model")
             self.tokenizer = self.create_tokenizer()
-            self.dataset = DNADataset(fasta_file, self.tokenizer, max_seq_length)
+            self.dataset = DNADataset(fasta_file, self.tokenizer, max_seq_length,
+                                      add_special_tokens=self.add_special_tokens)
             self.model = None
             print("No trained model loaded. Call train() to train the model.")
 
@@ -131,7 +134,7 @@ class GLMModel:
             json.dump(metadata, f, indent=2)
         print(f"Metadata saved to {self.meta_path}")
 
-    def train(self, epochs=30, batch_size=16, lr=2e-4, validation_split=0.2):
+    def train(self, epochs=30, batch_size=16, lr=2e-4, validation_split=0.2, mlm_probability=0.2):
         os.makedirs(self.model_path, exist_ok=True)
 
         g = torch.Generator().manual_seed(727)
@@ -143,7 +146,7 @@ class GLMModel:
         print(f"Dataset split: {n_train} training, {n_val} validation")
 
         data_collator = DataCollatorForLanguageModeling(
-            tokenizer=self.tokenizer, mlm=True, mlm_probability=0.15
+            tokenizer=self.tokenizer, mlm=True, mlm_probability=mlm_probability
         )
 
         config = BertConfig(
@@ -211,7 +214,7 @@ class GLMModel:
         self.model.to(self.device)
         self.model.eval()
 
-    def predict_position(self, sequence, position, debug=False):
+    def predict_position(self, sequence, position, debug=False, dna_only=True):
         if self.model is None:
             raise RuntimeError("Model not loaded or trained. Call train() first or load a trained model.")
 
@@ -228,7 +231,7 @@ class GLMModel:
             return_tensors="pt",
             padding=False,
             truncation=False,
-            add_special_tokens=True
+            add_special_tokens=self.add_special_tokens,
         ).to(self.device)
 
         # Find mask position
@@ -249,63 +252,52 @@ class GLMModel:
             print(f"Masked sequence:   {input_str}")
             print(f"Original char at pos {position}: '{original_char}'")
             print(f"Token IDs: {input_ids.tolist()}")
-            print(f"Attention mask: {inputs.attention_mask[0].tolist()}")
+            if hasattr(inputs, 'attention_mask'):
+                print(f"Attention mask: {inputs.attention_mask[0].tolist()}")
             print(f"[MASK] token ID: {mask_token_id}")
             print(f"[MASK] found at token position: {mask_token_position}")
-
             tokens = [self.tokenizer.decode([tid]) for tid in input_ids]
             print(f"Decoded tokens: {tokens}")
-
-        with torch.no_grad():
-            outputs = self.model(
-                input_ids=inputs.input_ids,
-                attention_mask=inputs.attention_mask
-            )
-            logits = outputs.logits[0, mask_token_position]
+            with torch.no_grad():
+                outputs = self.model(
+                    input_ids=inputs.input_ids,
+                    attention_mask=inputs.attention_mask if hasattr(inputs, 'attention_mask') else None,
+                )
+            logits = outputs.logits[0, mask_token_position].clone()
+            if dna_only:
+                allowed_ids = torch.tensor([self.tokenizer.vocab[c] for c in self.relevant_chars],
+                                           device=logits.device)
+            mask = torch.ones_like(logits, dtype=torch.bool)
+            mask[allowed_ids] = False
+            logits[mask] = -1e9
             probs = torch.softmax(logits, dim=-1)
-
-        if debug:
-            top_k = 5
+            if debug:
+                top_k = 5
             top_probs, top_indices = torch.topk(probs, top_k)
-            print(f"\nTop {top_k} predictions:")
+            print(f"Top {top_k} predictions: ")
             for i, (prob, idx) in enumerate(zip(top_probs, top_indices)):
                 token = self.tokenizer.decode([idx.item()])
-                print(f"  {i + 1}. '{token}' (ID: {idx.item()}): {prob.item():.4f}")
-
-            print(f"\nDNA character probabilities:")
+            print(f"  {i + 1}. '{token}' (ID: {idx.item()}): {prob.item():.4f}")
+            print(f"DNA character probabilities: ")
             for char in self.relevant_chars:
                 char_id = self.tokenizer.vocab[char]
-                print(f"  {char}: {probs[char_id].item():.4f}")
-            print(f"---\n")
-
+            print(f"  {char}: {probs[char_id].item():.4f}")
+            print(f"---")
         return probs.cpu().numpy()
 
-    def get_full_reconstruction_probs(self, sequence_to_evaluate, debug=False):
-        if self.model is None:
-            raise RuntimeError("Model not loaded or trained. Call train() first or load a trained model.")
-
-        seq_len = len(sequence_to_evaluate)
-
-        valid_chars = set(self.relevant_chars)
-        invalid_chars = set(sequence_to_evaluate) - valid_chars
-        if invalid_chars:
-            raise ValueError(f"Sequence contains invalid characters: {invalid_chars}. "
-                             f"Valid characters: {valid_chars}")
-
+    def get_full_reconstruction_probs(self, sequence_to_evaluate, debug=False, dna_only=True, renormalize=True):
         char_to_id = {c: self.tokenizer.vocab[c] for c in self.relevant_chars}
+        prob_matrix = np.zeros((len(sequence_to_evaluate), len(self.relevant_chars)))
 
-        prob_matrix = np.zeros((seq_len, len(self.relevant_chars)))
+        for pos in range(len(sequence_to_evaluate)):
+            probs = self.predict_position(sequence_to_evaluate, pos, debug=debug, dna_only=dna_only)
+            for i, char in enumerate(self.relevant_chars):
+                prob_matrix[pos, i] = probs[char_to_id[char]]
 
-        for pos in range(seq_len):
-            try:
-                probs = self.predict_position(sequence_to_evaluate, pos, debug)
-
-                for i, char in enumerate(self.relevant_chars):
-                    prob_matrix[pos, i] = probs[char_to_id[char]]
-
-            except Exception as e:
-                print(f"Warning: Error predicting position {pos}: {e}")
-                prob_matrix[pos, :] = 1.0 / len(self.relevant_chars)
+        if renormalize:
+            row_sums = prob_matrix.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1.0
+            prob_matrix = prob_matrix / row_sums
 
         return prob_matrix
 
