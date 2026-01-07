@@ -3,7 +3,7 @@ import torch
 import json
 import shutil
 from tokenizers import Tokenizer, models, pre_tokenizers
-from fundemental_classes.dna_dataset import DNADataset 
+from fundemental_classes.dna_dataset import DNADataset
 import os
 from transformers import (
     BertForMaskedLM,
@@ -14,6 +14,7 @@ from transformers import (
     Trainer,
 )
 from torch.utils.data import random_split
+
 
 class GLMModel:
     def __init__(self, model_path, fasta_file, max_seq_length=122, force_retrain=False):
@@ -203,39 +204,108 @@ class GLMModel:
 
         self._save_metadata(epochs, final_train_loss, final_val_loss)
 
-        self.plot_training_and_validation_curves(log_history, save_path=os.path.join(self.model_path, "training_curves.png"))
+        self.plot_training_and_validation_curves(log_history,
+                                                 save_path=os.path.join(self.model_path, "training_curves.png"))
 
         self.model = model
         self.model.to(self.device)
         self.model.eval()
 
-    def predict_position(self, sequence, position):
+    def predict_position(self, sequence, position, debug=False):
         if self.model is None:
             raise RuntimeError("Model not loaded or trained. Call train() first or load a trained model.")
 
-        seq_len = len(sequence)
+        if position < 0 or position >= len(sequence):
+            raise ValueError(f"Position {position} out of range for sequence of length {len(sequence)}")
+
         input_seq = list(sequence)
+        original_char = input_seq[position]
         input_seq[position] = '[MASK]'
         input_str = ''.join(input_seq)
-        inputs = self.tokenizer(input_str, return_tensors="pt").to(self.device)
-        mask_token_position = min(position + 1, inputs.input_ids.shape[1] - 2)
+
+        inputs = self.tokenizer(
+            input_str,
+            return_tensors="pt",
+            padding=False,
+            truncation=False,
+            add_special_tokens=True
+        ).to(self.device)
+
+        # Find mask position
+        mask_token_id = self.tokenizer.mask_token_id
+        input_ids = inputs.input_ids[0]
+        mask_positions = (input_ids == mask_token_id).nonzero(as_tuple=True)[0]
+
+        if len(mask_positions) == 0:
+            raise RuntimeError(f"[MASK] token not found in tokenized sequence.")
+        if len(mask_positions) > 1:
+            raise RuntimeError(f"Multiple [MASK] tokens found.")
+
+        mask_token_position = mask_positions[0].item()
+
+        if debug:
+            print(f"\n--- Debug Info for position {position} ---")
+            print(f"Original sequence: {sequence}")
+            print(f"Masked sequence:   {input_str}")
+            print(f"Original char at pos {position}: '{original_char}'")
+            print(f"Token IDs: {input_ids.tolist()}")
+            print(f"Attention mask: {inputs.attention_mask[0].tolist()}")
+            print(f"[MASK] token ID: {mask_token_id}")
+            print(f"[MASK] found at token position: {mask_token_position}")
+
+            tokens = [self.tokenizer.decode([tid]) for tid in input_ids]
+            print(f"Decoded tokens: {tokens}")
 
         with torch.no_grad():
-            outputs = self.model(**inputs)
+            outputs = self.model(
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask
+            )
             logits = outputs.logits[0, mask_token_position]
             probs = torch.softmax(logits, dim=-1)
 
+        if debug:
+            top_k = 5
+            top_probs, top_indices = torch.topk(probs, top_k)
+            print(f"\nTop {top_k} predictions:")
+            for i, (prob, idx) in enumerate(zip(top_probs, top_indices)):
+                token = self.tokenizer.decode([idx.item()])
+                print(f"  {i + 1}. '{token}' (ID: {idx.item()}): {prob.item():.4f}")
+
+            print(f"\nDNA character probabilities:")
+            for char in self.relevant_chars:
+                char_id = self.tokenizer.vocab[char]
+                print(f"  {char}: {probs[char_id].item():.4f}")
+            print(f"---\n")
+
         return probs.cpu().numpy()
 
-    def get_full_reconstruction_probs(self, sequence_to_evaluate):
+    def get_full_reconstruction_probs(self, sequence_to_evaluate, debug=False):
+        if self.model is None:
+            raise RuntimeError("Model not loaded or trained. Call train() first or load a trained model.")
+
         seq_len = len(sequence_to_evaluate)
+
+        valid_chars = set(self.relevant_chars)
+        invalid_chars = set(sequence_to_evaluate) - valid_chars
+        if invalid_chars:
+            raise ValueError(f"Sequence contains invalid characters: {invalid_chars}. "
+                             f"Valid characters: {valid_chars}")
+
         char_to_id = {c: self.tokenizer.vocab[c] for c in self.relevant_chars}
+
         prob_matrix = np.zeros((seq_len, len(self.relevant_chars)))
 
         for pos in range(seq_len):
-            probs = self.predict_position(sequence_to_evaluate, pos)
-            for i, char in enumerate(self.relevant_chars):
-                prob_matrix[pos, i] = probs[char_to_id[char]]
+            try:
+                probs = self.predict_position(sequence_to_evaluate, pos, debug)
+
+                for i, char in enumerate(self.relevant_chars):
+                    prob_matrix[pos, i] = probs[char_to_id[char]]
+
+            except Exception as e:
+                print(f"Warning: Error predicting position {pos}: {e}")
+                prob_matrix[pos, :] = 1.0 / len(self.relevant_chars)
 
         return prob_matrix
 
@@ -273,9 +343,11 @@ class GLMModel:
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
         ax1 = axes[0]
-        ax1.plot(train_steps, train_losses, 'b-', linewidth=2, marker='o', markersize=4, label='Training Loss', alpha=0.7)
+        ax1.plot(train_steps, train_losses, 'b-', linewidth=2, marker='o', markersize=4, label='Training Loss',
+                 alpha=0.7)
         if eval_losses:
-            ax1.plot(eval_steps, eval_losses, 'r-', linewidth=2, marker='s', markersize=4, label='Validation Loss', alpha=0.7)
+            ax1.plot(eval_steps, eval_losses, 'r-', linewidth=2, marker='s', markersize=4, label='Validation Loss',
+                     alpha=0.7)
         ax1.set_title('Training vs Validation Loss', fontsize=12, fontweight='bold')
         ax1.set_xlabel('Training Steps', fontsize=10)
         ax1.set_ylabel('Cross-Entropy Loss', fontsize=10)
