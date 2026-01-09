@@ -34,8 +34,8 @@ python visualize_data_new.py (which reports validation loss and perplexity).
 
 Compute dependency maps with
 python fundemental_classes/visualization/run_dependency_maps.py
-or again via visualize_data_new.py.
+or again via evaluate_display_data.py.
 
-The dependency analysis prepares clean validation sequences, separates motif-A and motif-B sequences, computes the maps, and saves all results—heatmaps, input sequences, and manifest CSV files—for further inspection. Finally, dataset-level statistics can be generated using
+The dependency analysis prepares validation sequences, separates motif-A and motif-B sequences, computes the maps, and saves all results—heatmaps, input sequences, and manifest CSV files—for further inspection. Finally, dataset-level statistics can be generated using
 python fundemental_classes/visualization/stats.py,
 which produces the motif and deletion analyses described above.
