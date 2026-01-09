@@ -4,10 +4,11 @@ import numpy as np
 
 
 class DNADataset(torch.utils.data.Dataset):
-    def __init__(self, fasta_file, tokenizer, max_len):
+    def __init__(self, fasta_file, tokenizer, max_len, add_special_tokens=False):
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.fasta_file = fasta_file
+        self.add_special_tokens = add_special_tokens
         self.seqs = self.create_sequences()
 
     def __len__(self):
@@ -15,9 +16,14 @@ class DNADataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         seq = self.seqs[idx]
-        encoded = self.tokenizer(seq, max_length=self.max_len,
-                                 padding="max_length", truncation=True,
-                                 return_tensors="pt")
+        encoded = self.tokenizer(
+            seq,
+            max_length=self.max_len,
+            padding="max_length",
+            truncation=True,
+            add_special_tokens=self.add_special_tokens,
+            return_tensors="pt"
+        )
         return {k: v.squeeze(0) for k, v in encoded.items()}
 
     def create_sequences(self):
@@ -36,7 +42,6 @@ class DNADataset(torch.utils.data.Dataset):
                 sequences.append(current_seq)
 
         return sequences
-
 
     @staticmethod
     def parse_header(header_str):
