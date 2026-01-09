@@ -1,6 +1,6 @@
 The file glm_model_new.py builds on Georgi’s original glm_model.py class and introduces some extensions.
 
-Use of a saved train/validation split, stored in split_indices.npz.
+- Use of a saved train/validation split, stored in split_indices.npz.
 The dataset is divided into training and validation sets only once, and this split is kept to ensure that all evaluations use the same held-out sequences.
   
 The updated model also includes compatibility with HuggingFace’s TrainingArguments, automatically handling differences between older and newer versions (such as evaluation_strategy versus eval_strategy). This ensures that the training code runs across different environments without any manual adjustments.
