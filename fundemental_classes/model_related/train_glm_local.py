@@ -1,7 +1,7 @@
 import os
 import csv
 
-from fundemental_classes.glm_model2 import GLMModel
+from glm_model_new import GLMModel
 
 PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
 
@@ -20,8 +20,11 @@ def main():
 
    glm = GLMModel(model_path=MODEL_OUT, fasta_file=FASTA_PATH, max_seq_length=256)
 
-   # Train with train/val split and best-model selection
-   glm.train(epochs=30, batch_size=16, lr=2e-4, seed=727, val_ratio=0.2)
+   # Train only if no trained model is available
+   if glm.model is None:
+       glm.train(epochs=30, batch_size=16, lr=2e-4, seed=727, val_ratio=0.2)
+   else:
+       print("Model already exists -> skipping training.")
 
    # Overall model quality on VAL
    q = glm.evaluate_mlm_quality_on_val(n_samples=500, mlm_probability=0.15, seed=0)
