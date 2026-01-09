@@ -1,47 +1,41 @@
-Amelie Part
+The file glm_model_new.py builds on Georgi’s original glm_model.py class and introduces some extensions.
 
-The file glm_model_new.py is based on Georgi’s original glm_model.py class and extends it with several important additions. 
+Use of a saved train/validation split, stored in split_indices.npz.
+The dataset is divided into training and validation sets only once, and this split is kept to ensure that all evaluations use the same held-out sequences.
+  
+The updated model also includes compatibility with HuggingFace’s TrainingArguments, automatically handling differences between older and newer versions (such as evaluation_strategy versus eval_strategy). This ensures that the training code runs across different environments without any manual adjustments.
 
-These extensions include a saved train/validation split stored in split_indices.npz, compatibility with different HuggingFace TrainingArguments versions (handling evaluation_strategy versus eval_strategy), an evaluation routine for masked-language-model quality on the validation set (computing loss and perplexity with CSV export), a fast variant scoring method called delta_likelihood_fast, and an influence-based method called influence_probability_shift.
+After training, model performance is assessed on the validation set. 
 
-A key extension is the saved train/validation split. 
+The evaluation computes masked language modeling loss and perplexity, both of which reflect how well the model captures the structure of DNA sequences. 
 
-The dataset is split only once into training and validation sets, and this split is stored on disk. 
+The code also introduces a fast variant scoring method called delta_likelihood_fast, which estimates how much less likely a sequence with deletions is compared to the original. 
 
-This ensures that all evaluations are performed on exactly the same held-out sequences, making results reproducible and directly comparable across runs.
+- see the GLM-2.pdf for more informations. 
 
-Another extension concerns HuggingFace compatibility. 
+In addition, new dependency and influence mapping tools were developed. These methods track how a change at one position in a sequence affects predictions at other positions. 
 
-
-The training code is written to work across different HuggingFace versions, which allows the model to run reliably on different machines and environments without manual changes.
-
-Model quality is assessed on the validation set after training. The model is evaluated on the full set of validation sequences using masked-language-model loss and perplexity. These two metrics together provide a clear, global measure of how well the model captures the structure of the DNA sequences.
-The method delta_likelihood_fast enables fast variant scoring. It measures how much a sequence containing deletions becomes less likely under the model compared to the original sequence. This provides a direct and interpretable way to score insertion and deletion variants.
-
-In addition, dependency and influence mapping methods are implemented. These track how changes at one position in a sequence affect the model’s predictions at other positions. This makes it possible to visualize long-range dependencies and motifs learned by the model.
-
-The model itself is trained as a masked-language model. During training, it predicts a masked nucleotide based on the surrounding sequence context. Because deletions are explicitly included as part of the model’s vocabulary, the model learns how missing bases influence predictions at other positions. This makes it possible to study motif structure, long-range dependencies, and the way deletions propagate information through DNA sequences.
-During training, the dataset is split once into training and validation sets and the split is saved. All later evaluations are therefore carried out exclusively on held-out validation sequences. After training, a model quality score is computed on the validation set using masked-language-model loss and perplexity. Together, these provide a single, objective summary of how well the GLM understands DNA.
+The model itself is trained as a masked-language model, predicting masked nucleotides based on their surrounding context. Since deletions are included in the model’s vocabulary, it also learns how missing bases affect predictions elsewhere in the sequence.
 
 
-To analyze dependencies learned by the model, a new dependency map method was added that measures sensitivity to deletions. For a given sequence, a single position is deleted, the predicted base distributions at all other positions are recomputed, and the resulting changes are stored as a heatmap. Each cell in this heatmap answers the question: “If position i is deleted, how much does it affect position j?” These maps reveal motif boundaries, structural regions, and long-range dependencies in an intuitive way.
-In addition to the model code, the script fundemental_classes/visualization/stats.py (which already acts as a main script and can be run directly) analyzes the simulated FASTA dataset containing motif A, motif B, and deletion annotations. It reads FASTA files whose sequence headers encode which motifs are present (both, A_only, B_only, or no_motif), the start positions of motif A and motif B, the gap between motifs, and the total number of deletions in each sequence. The script counts how many sequences belong to each motif class, computes how many deletions occur per sequence, and measures where deletions occur relative to the motifs, distinguishing deletions before motif A, between motif A and motif B, and after motif B. It outputs CSV files containing per-sequence statistics for each motif class, as well as a single four-panel summary figure showing class frequencies, motif positions, total deletions per sequence, and deletions between motif A and motif B.
+To better understand these dependencies, a new dependency map method measures the model’s sensitivity to deletions. For a given sequence, a single position is deleted, and the model recomputes predictions for all other positions. The resulting changes are displayed as a heatmap, where each cell represents how much position i influences position j.
 
-To run the full pipeline, the model can first be trained using
-python fundemental_classes/model_related/train_glm_local.py.
-Model quality can then be evaluated with
-python fundemental_classes/model_related/eval_glm_local.py,
-or alternatively by running
-python visualize_data_new.py,
-which produces validation loss and perplexity.
+Beyond the modeling itself, the script fundemental_classes/visualization/stats.py provides detailed dataset analysis. It works with the simulated FASTA dataset containing motifs A, B etc... and deletion annotations. By examining FASTA sequence headers, the script determines which motifs are present (both, A only, B only, or none), their start positions, the gap between motifs, and total deletions per sequence. It then counts sequences per motif class, measures the number and position of deletions, and differentiates between deletions occurring before motif A, between motifs A and B, or after motif B. Results are saved as CSV files and visualized in a concise four-panel summary figure showing class frequencies, motif positions, total deletions per sequence, and deletions between motifs.
 
-Dependency maps can be computed by running
-python fundemental_classes/visualization/run_dependency_maps.py,
-or again via
-python visualize_data_new.py.
+The full analysis pipeline can be run as follows:
 
-This selects clean validation sequences, separates motif-A and motif-B sequences, computes dependency heatmaps, and saves all maps together with the input sequences and a manifest CSV file.
-Finally, dataset statistics can be generated by running
+Train the model with
+python fundemental_classes/model_related/train_glm_local.py
+
+Evaluate model quality using either
+python fundemental_classes/model_related/eval_glm_local.py
+or
+python visualize_data_new.py (which reports validation loss and perplexity).
+
+Compute dependency maps with
+python fundemental_classes/visualization/run_dependency_maps.py
+or again via visualize_data_new.py.
+
+The dependency analysis prepares clean validation sequences, separates motif-A and motif-B sequences, computes the maps, and saves all results—heatmaps, input sequences, and manifest CSV files—for further inspection. Finally, dataset-level statistics can be generated using
 python fundemental_classes/visualization/stats.py,
 which produces the motif and deletion analyses described above.
-
