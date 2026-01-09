@@ -2,8 +2,8 @@ import os
 import random
 import csv
 
-from fundemental_classes.glm_model2 import GLMModel
-from fundemental_classes.visualization.sequence_plotter import SequenceLogoPlotter
+from glm_model_new import GLMModel
+from sequence_plotter import SequenceLogoPlotter
 
 PROJECT_ROOT = "/Users/amelielaura/Documents/Project6"
 
@@ -48,6 +48,14 @@ def main():
    os.makedirs(OUT_SEQS_DIR, exist_ok=True)
 
    glm = GLMModel(model_path=MODEL_OUT, fasta_file=FASTA_PATH, max_seq_length=256)
+
+   # Must have trained model
+   if glm.model is None:
+       raise RuntimeError("No trained model found. Run train_and_quality.py first.")
+
+   # Ensure split exists (creates if missing)
+   glm.ensure_split(seed=727, val_ratio=0.2)
+
    plotter = SequenceLogoPlotter()
 
    # ---- IMPORTANT: use VAL split (not training set) ----
@@ -60,11 +68,11 @@ def main():
    # Use clean sequences (no '-') as reference candidates from VAL
    clean_val_idx = [i for i in val_idx if "-" not in seqs[i]]
    if not clean_val_idx:
-       raise RuntimeError("No clean sequences found in VAL. Need some sequences without '-' as reference.")
+       raise RuntimeError("No clean sequences found in VAL. Need sequences without '-' as reference.")
 
    random.shuffle(clean_val_idx)
 
-   # optional: overall model quality score (VAL)
+   # overall model quality score (VAL) - appended into every row for convenience
    quality = glm.evaluate_mlm_quality_on_val(n_samples=500)
    val_loss = quality["val_mlm_loss"]
    val_ppl = quality["val_perplexity"]
