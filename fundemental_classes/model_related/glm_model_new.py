@@ -587,7 +587,7 @@ class GLMModel:
        return {"influence_score": float(total), "query_positions": query_positions, "target_window": (t0, t1), "metric": metric, "reduce": reduce}
 
    # ============================================================
-   # Plotting
+   # Plotting 
    # ============================================================
    @staticmethod
    def plot_training_and_validation_curves(log_history, save_path=None):
