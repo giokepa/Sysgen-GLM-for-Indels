@@ -1,41 +1,68 @@
-The file glm_model_new.py builds on Georgi’s original glm_model.py class and introduces some extensions.
+# Project6 – DNA GLM (Indels) – Local evaluation + dependency maps
 
-- Use of a saved train/validation split, stored in split_indices.npz.
-The dataset is divided into training and validation sets only once, and this split is kept to ensure that all evaluations use the same held-out sequences.
-  
-- The updated model also includes compatibility with HuggingFace’s TrainingArguments, automatically handling differences between older and newer versions (such as evaluation_strategy versus eval_strategy). This ensures that the training code runs across different environments without any manual adjustments.
+This repository contains my end-to-end workflow for testing a trained DNA BERT/GLM model on:
+1) **Reconstruction plots** (per-position reconstruction probabilities)  
+2) **Model-level evaluation on a validation split** (MLM loss + perplexity)  
+3) **Ref vs. Alt scoring** (delta likelihood + influence / probability shift)  
+4) **Dependency maps** (how much a deletion at position *i* changes predictions at position *j*)
 
-- After training, model performance is assessed on the validation set. 
+Everything is built to run locally in PyCharm and also headless (cluster-safe), because all plots use a non-interactive Matplotlib backend (`Agg`) and are saved directly to disk.
 
-- The evaluation computes masked language modeling loss and perplexity, both of which reflect how well the model captures the structure of DNA sequences. 
+---
 
-- The code also introduces a fast variant scoring method called delta_likelihood_fast, which estimates how much less likely a sequence with deletions is compared to the original. 
+## Quick start (what you need)
 
-- see the GLM-2.pdf for more informations. 
+- A trained model folder (example: `dna_bert_final/`) containing:
+ - `config.json`
+ - `tokenizer.json`
+ - `training_metadata.json`
+ - model weights (`pytorch_model.bin` or `model.safetensors`)
 
-- In addition, new dependency and influence mapping tools were developed. These methods track how a change at one position in a sequence affects predictions at other positions. 
+- A FASTA dataset file used for loading / sampling sequences  
+ (same format as the training FASTA, with metadata stored in the header line)
 
-- The model itself is trained as a masked-language model, predicting masked nucleotides based on their surrounding context. Since deletions are included in the model’s vocabulary, it also learns how missing bases affect predictions elsewhere in the sequence.
+---
 
+## What each script does
 
-- To better understand these dependencies, a new dependency map method measures the model’s sensitivity to deletions. For a given sequence, a single position is deleted, and the model recomputes predictions for all other positions. The resulting changes are displayed as a heatmap, where each cell represents how much position i influences position j.
+### `main_all_in_one.py`  “run everything”
+This is the main integration script. It:
+- loads the trained `GLMModel`
+- creates a **reconstruction plot** for a chosen example sequence
+- builds a reproducible **train/val split**
+- runs **MLM validation quality** (loss + perplexity)
+- runs **ref vs alt scoring** (delta-likelihood + influence score)
+- generates **dependency maps** for many sequences (e.g. 50 `A_only` + 50 `B_only`)
+- writes all outputs into one result folder (plots + CSVs + manifest)
 
-- Beyond the modeling itself, the script fundemental_classes/visualization/stats.py provides detailed dataset analysis. It works with the simulated FASTA dataset containing motifs A, B etc... and deletion annotations. By examining FASTA sequence headers, the script determines which motifs are present (both, A only, B only, or none), their start positions, the gap between motifs, and total deletions per sequence. It then counts sequences per motif class, measures the number and position of deletions, and differentiates between deletions occurring before motif A, between motifs A and B, or after motif B. Results are saved as CSV files and visualized in a concise four-panel summary figure showing class frequencies, motif positions, total deletions per sequence, and deletions between motifs.
+Outputs typically include:
+- `reconstruction_*.png`
+- `model_quality.csv`
+- `eval_ref_alt.csv`
+- `dependency_maps/` folder:
+ - `.png` heatmaps
+ - `.npy` matrices
+ - `manifest.csv` pointing to all files
+ - `*_input.txt` storing the exact sequence used (for traceability)
 
-- The full analysis pipeline can be run as follows:
+---
 
-Train the model with
-python fundemental_classes/model_related/train_glm_local.py
+### `stats.py`
+This script is used to summarize dataset characteristics and/or output distributions.
+I use it after `main_all_in_one.py` to quickly sanity-check:
+- how many sequences per label exist
+- deletion statistics
+- motif position distributions
+- any basic CSV summaries that help interpret results
 
-- Evaluate model quality using either
-python fundemental_classes/model_related/eval_glm_local.py
-or
-python visualize_data_new.py (which reports validation loss and perplexity).
+(So: **main runs the experiments**, **stats summarizes the data/results**.)
 
-- Compute dependency maps with
-python fundemental_classes/visualization/run_dependency_maps.py
-or again via evaluate_display_data.py.
+---
 
-- The dependency analysis prepares validation sequences, separates motif-A and motif-B sequences, computes the maps, and saves all results—heatmaps, input sequences, and manifest CSV files—for further inspection. Finally, dataset-level statistics can be generated using
-python fundemental_classes/visualization/stats.py,
-which produces the motif and deletion analyses described above.
+## How to run (recommended)
+
+### 1) Run the full pipeline
+From the project root:
+
+```bash
+python3 main_all_in_one.py
