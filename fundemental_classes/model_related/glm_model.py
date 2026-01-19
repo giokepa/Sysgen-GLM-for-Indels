@@ -258,31 +258,37 @@ class GLMModel:
             print(f"[MASK] found at token position: {mask_token_position}")
             tokens = [self.tokenizer.decode([tid]) for tid in input_ids]
             print(f"Decoded tokens: {tokens}")
-            with torch.no_grad():
-                outputs = self.model(
-                    input_ids=inputs.input_ids,
-                    attention_mask=inputs.attention_mask if hasattr(inputs, 'attention_mask') else None,
-                )
-            logits = outputs.logits[0, mask_token_position].clone()
-            if dna_only:
-                allowed_ids = torch.tensor([self.tokenizer.vocab[c] for c in self.relevant_chars],
-                                           device=logits.device)
+
+        with torch.no_grad():
+            outputs = self.model(
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask if hasattr(inputs, 'attention_mask') else None,
+            )
+
+        logits = outputs.logits[0, mask_token_position].clone()
+
+        if dna_only:
+            allowed_ids = torch.tensor([self.tokenizer.vocab[c] for c in self.relevant_chars],
+                                       device=logits.device)
             mask = torch.ones_like(logits, dtype=torch.bool)
             mask[allowed_ids] = False
             logits[mask] = -1e9
-            probs = torch.softmax(logits, dim=-1)
-            if debug:
-                top_k = 5
+
+        probs = torch.softmax(logits, dim=-1)
+
+        if debug:
+            top_k = 5
             top_probs, top_indices = torch.topk(probs, top_k)
             print(f"Top {top_k} predictions: ")
             for i, (prob, idx) in enumerate(zip(top_probs, top_indices)):
                 token = self.tokenizer.decode([idx.item()])
-            print(f"  {i + 1}. '{token}' (ID: {idx.item()}): {prob.item():.4f}")
+                print(f"  {i + 1}. '{token}' (ID: {idx.item()}): {prob.item():.4f}")
             print(f"DNA character probabilities: ")
             for char in self.relevant_chars:
                 char_id = self.tokenizer.vocab[char]
-            print(f"  {char}: {probs[char_id].item():.4f}")
+                print(f"  {char}: {probs[char_id].item():.4f}")
             print(f"---")
+
         return probs.cpu().numpy()
 
     def get_full_reconstruction_probs(self, sequence_to_evaluate, debug=False, dna_only=True, renormalize=True):
