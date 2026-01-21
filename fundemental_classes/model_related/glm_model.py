@@ -69,7 +69,8 @@ class GLMModel:
             required_files = {
                 "config.json": os.path.join(self.model_path, "config.json"),
                 "model weights": os.path.join(self.model_path, "pytorch_model.bin"),
-                "tokenizer": os.path.join(self.model_path, "tokenizer.json")
+                "tokenizer": os.path.join(self.model_path, "tokenizer.json"),
+                "training_history": os.path.join(self.model_path, "training_history.json")
             }
 
             if not os.path.exists(required_files["model weights"]):
@@ -99,7 +100,7 @@ class GLMModel:
             print(f"Model loaded successfully!")
             print(f"Trained for {metadata.get('epochs_completed', 'N/A')} epochs")
             print(f"Final validation loss: {metadata.get('final_val_loss', 'N/A'):.4f}")
-
+            self.load_and_plot_history()
             return True
 
         except Exception as e:
@@ -209,6 +210,8 @@ class GLMModel:
 
         self.plot_training_and_validation_curves(log_history,
                                                  save_path=os.path.join(self.model_path, "training_curves.png"))
+        history_path = os.path.join(self.model_path, "training_history.json")
+        self._save_training_history(log_history, history_path)
 
         self.model = model
         self.model.to(self.device)
@@ -306,6 +309,36 @@ class GLMModel:
             prob_matrix = prob_matrix / row_sums
 
         return prob_matrix
+
+    def load_and_plot_history(self, custom_save_path=None):
+        history_path = os.path.join(self.model_path, "training_history.json")
+
+        if not os.path.exists(history_path):
+            print(f"No training history found at {history_path}")
+            return
+
+        with open(history_path, 'r') as f:
+            log_history = json.load(f)
+
+        save_path = custom_save_path or os.path.join(self.model_path, "training_curves_replotted.png")
+        self.plot_training_and_validation_curves(log_history, save_path=save_path)
+
+        return log_history
+
+    def _save_training_history(self, log_history, save_path):
+        serializable_history = []
+        for log in log_history:
+            serializable_log = {}
+            for key, value in log.items():
+                if isinstance(value, torch.Tensor):
+                    serializable_log[key] = value.item()
+                else:
+                    serializable_log[key] = value
+            serializable_history.append(serializable_log)
+
+        with open(save_path, 'w') as f:
+            json.dump(serializable_history, f, indent=2)
+        print(f"Training history saved to {save_path}")
 
     @staticmethod
     def plot_training_and_validation_curves(log_history, save_path=None):
