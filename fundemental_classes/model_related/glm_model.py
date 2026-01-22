@@ -17,7 +17,7 @@ from torch.utils.data import random_split
 
 
 class GLMModel:
-    def __init__(self, model_path, fasta_file, max_seq_length=150, force_retrain=False):
+    def __init__(self, model_path, fasta_file, max_seq_length=200, force_retrain=False):
         self.model_path = model_path
         self.meta_path = os.path.join(model_path, "training_metadata.json")
         self.max_length = max_seq_length

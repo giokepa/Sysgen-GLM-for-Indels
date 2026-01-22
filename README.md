@@ -1,6 +1,7 @@
 # Project6 – DNA GLM (Indels) 
 
 generate_data.ipynb can be used to generate data for training and testing. 
+
 visualize_data.ipynb can be used to train the model and visualize reconstruction of the model.
 
 This repository contains my end-to-end workflow for testing a trained DNA BERT/GLM model on:
