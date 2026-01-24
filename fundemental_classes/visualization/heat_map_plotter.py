@@ -8,8 +8,9 @@ from transformers import DefaultDataCollator
 
 
 class DependencyMapGenerator:
-    def __init__(self, glm_model_wrapper):
-
+    def __init__(self, glm_model_wrapper, type):
+        # type can be 'snp' or 'indel'
+        self.type = type
         self.tokenizer = glm_model_wrapper.tokenizer
         self.device = glm_model_wrapper.device
         self.model = glm_model_wrapper.model.to(self.device)
@@ -31,14 +32,21 @@ class DependencyMapGenerator:
 
         mutate_until_position = len(seq)
 
-        for i in range(mutate_until_position):
-            for nuc in ['-', 'A', 'C', 'G', 'T']:
-                if nuc != seq[i]:
-                    mutated_sequences['seq'].append(seq[:i] + nuc + seq[i + 1:])
+        if self.type == 'snp': # substitution of ACGT to other ACGT
+            for i in range(mutate_until_position):
+                for nuc in ['A', 'C', 'G', 'T']:
+                        if nuc != seq[i] and seq[i] in ['A', 'C', 'G', 'T']:
+                            mutated_sequences['seq'].append(seq[:i] + nuc + seq[i + 1:])
+                            mutated_sequences['mutation_pos'].append(i)
+                            mutated_sequences['nuc'].append(nuc)
+                            mutated_sequences['var_nt_idx'].append(self.nuc_table[nuc])
+        elif self.type == 'indel': # mutate sequence by replacing ACGT with '-'
+            for i in range(mutate_until_position):
+                if seq[i] in ['A', 'C', 'G', 'T']:
+                    mutated_sequences['seq'].append(seq[:i] + '-' + seq[i + 1:])
                     mutated_sequences['mutation_pos'].append(i)
-                    mutated_sequences['nuc'].append(nuc)
-                    mutated_sequences['var_nt_idx'].append(self.nuc_table[nuc])
-
+                    mutated_sequences['nuc'].append('-')
+                    mutated_sequences['var_nt_idx'].append(self.nuc_table['-'])
         return pd.DataFrame(mutated_sequences)
 
     def _tok_func(self, x):
@@ -135,8 +143,9 @@ class DependencyMapGenerator:
         ax.set_aspect('equal')
         plt.show()
 
-    def analyze(self, sequence, vmax=None, annot=False):
+    def analyze(self, sequence, vmax=None, annot=False, show_plot=True):
         print("Computing dependency map...")
         dep_map = self.compute_map(sequence)
-        self.plot(dep_map, sequence=sequence, vmax=vmax, annot=annot)
+        if show_plot:
+            self.plot(dep_map, sequence=sequence, vmax=vmax, annot=annot)
         return dep_map

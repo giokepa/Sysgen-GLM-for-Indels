@@ -7,11 +7,7 @@ import numpy as np
 from fundemental_classes.dna_dataset import DNADataset
 
 
-def plot(header, sequence, prob_matrix, motif_length=10,
-         small_ic_threshold=0.05,     # letters with IC <= this are moved "below"
-         min_below_total=0.04,        # minimum total stack height below baseline
-         max_below_total=0.35): 
-
+def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05):     # letters with IC <= this are moved "below" 
     df = pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T', '-'])
     ic_df = logomaker.transform_matrix(df, from_type='probability', to_type='information')
 
@@ -47,45 +43,40 @@ def plot(header, sequence, prob_matrix, motif_length=10,
     draw_motif_box(start_a, "Motif A")
     draw_motif_box(start_b, "Motif B")
 
-    def inv_total_height(values, threshold):
-        """
-        values: array of IC values that are <= threshold
-        smaller values => larger total height
-        """
-        if len(values) == 0:
-            return 0.0
-        # Use mean as a summary of "how small" they are
-        m = float(np.mean(values))
-        s = (threshold - m) / max(threshold, 1e-12)  # m->0 => s->1
+    def inv_h(v, thr, min_len, max_len, gamma=2.0):
+        s = (thr - v) / max(thr, 1e-12)   # normalize to [0,1]
         s = float(np.clip(s, 0.0, 1.0))
-        return min_below_total + s * (max_below_total - min_below_total)
+        s = s ** gamma                   # amplify differences
+        return min_len + s * (max_len - min_len)
 
     letters = ['A', 'C', 'G', 'T', '-']
     L = min(len(ic_df), seq_len)
 
     for pos in range(L):
-        # Pick "small" letters at this position
+        # collect "small" letters at this position
         small = [(letter, float(ic_df.loc[pos, letter]))
-                 for letter in letters
-                 if 0 < float(ic_df.loc[pos, letter]) <= small_ic_threshold]
+                for letter in letters
+                if 0 < float(ic_df.loc[pos, letter]) <= small_ic_threshold]
 
         if not small:
             continue
 
-        vals = np.array([v for _, v in small], dtype=float)
-        total_h = inv_total_height(vals, small_ic_threshold)
+        # purely visual order: smallest IC first
+        small.sort(key=lambda x: x[1])
 
-        # Split total height among letters proportional to their IC
-        denom = float(vals.sum()) if vals.sum() > 0 else 1.0
+        y_cursor = y_line
+        for letter, v in small:
+            h = inv_h(
+                v,
+                small_ic_threshold,
+                min_len=0.01,    # tune this
+                max_len=0.8,    # tune this
+                gamma=4.0        # tune this (2–4 is usually good)
+            )
 
-        y_cursor = y_line  # start at baseline and stack downward
-        for letter, v in sorted(small, key=lambda x: x[1]):  # small-to-larger (order is aesthetic)
-            h = total_h * (v / denom)
-
-            # Draw a bar segment of width 1 stacked downward at x=pos
             rect = patches.Rectangle(
-                (pos - 0.5, y_cursor - h),
-                1.0,
+                (pos - 0.5, y_cursor - h),  # center at pos
+                0.7,  # width
                 h,
                 linewidth=0,
                 facecolor=dna_colors[letter],
