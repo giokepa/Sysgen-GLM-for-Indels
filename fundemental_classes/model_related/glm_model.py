@@ -17,13 +17,18 @@ from torch.utils.data import random_split
 
 
 class GLMModel:
-    def __init__(self, model_path, fasta_file, max_seq_length=200, force_retrain=False):
+    def __init__(self, model_path, fasta_file, max_seq_length=200, force_retrain=False, include_deletions=True):
         self.model_path = model_path
         self.meta_path = os.path.join(model_path, "training_metadata.json")
         self.max_length = max_seq_length
-        self.relevant_chars = ['A', 'C', 'G', 'T', '-']
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.include_deletions = include_deletions
 
+        if self.include_deletions:
+            self.relevant_chars = ['A', 'C', 'G', 'T', '-']
+        else:
+            self.relevant_chars = ['A', 'C', 'G', 'T']
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.add_special_tokens = False
 
         if force_retrain:
@@ -35,8 +40,8 @@ class GLMModel:
             load_success = self._try_load_existing_model(fasta_file, max_seq_length)
 
         if not load_success:
-            print("Initializing fresh model")
-            self.tokenizer = self.create_tokenizer()
+            print(f"Initializing fresh model (include_deletions={self.include_deletions})")
+            self.tokenizer = self.create_tokenizer(include_deletions=self.include_deletions)
             self.dataset = DNADataset(fasta_file, self.tokenizer, max_seq_length,
                                       add_special_tokens=self.add_special_tokens)
             self.model = None
@@ -49,7 +54,6 @@ class GLMModel:
                 print(f"Removed directory: {self.model_path}")
             except Exception as e:
                 print(f"Could not remove {self.model_path}: {e}")
-
         if os.path.exists("temp_tokenizer.json"):
             try:
                 os.remove("temp_tokenizer.json")
@@ -60,10 +64,16 @@ class GLMModel:
     def _try_load_existing_model(self, fasta_file, max_seq_length):
         try:
             print(f"Checking for existing trained model in {self.model_path}")
-
             metadata = self._load_metadata()
+
             if not metadata.get("trained", False):
                 print("No trained model found (metadata missing or trained=False)")
+                return False
+
+            saved_include_deletions = metadata.get("include_deletions", True)
+            if saved_include_deletions != self.include_deletions:
+                print(f"Model was trained with include_deletions={saved_include_deletions}, "
+                      f"but current setting is {self.include_deletions}. Cannot load.")
                 return False
 
             required_files = {
@@ -72,7 +82,6 @@ class GLMModel:
                 "tokenizer": os.path.join(self.model_path, "tokenizer.json"),
                 "training_history": os.path.join(self.model_path, "training_history.json")
             }
-
             if not os.path.exists(required_files["model weights"]):
                 required_files["model weights"] = os.path.join(self.model_path, "model.safetensors")
 
@@ -98,6 +107,7 @@ class GLMModel:
             self.model.to(self.device)
             self.model.eval()
             print(f"Model loaded successfully!")
+            print(f"Model type: {'With deletions' if self.include_deletions else 'Baseline (no deletions)'}")
             print(f"Trained for {metadata.get('epochs_completed', 'N/A')} epochs")
             print(f"Final validation loss: {metadata.get('final_val_loss', 'N/A'):.4f}")
             self.load_and_plot_history()
@@ -128,7 +138,9 @@ class GLMModel:
             "final_train_loss": float(final_train_loss),
             "final_val_loss": float(final_val_loss),
             "training_date": datetime.datetime.now().isoformat(),
-            "dataset_size": len(self.dataset)
+            "dataset_size": len(self.dataset),
+            "include_deletions": self.include_deletions,
+            "vocab_size": len(self.relevant_chars) + 5
         }
         os.makedirs(self.model_path, exist_ok=True)
         with open(self.meta_path, 'w') as f:
@@ -145,13 +157,16 @@ class GLMModel:
         train_ds, val_ds = random_split(self.dataset, [n_train, n_val], generator=g)
 
         print(f"Dataset split: {n_train} training, {n_val} validation")
+        print(f"Model type: {'With deletions' if self.include_deletions else 'Baseline (no deletions)'}")
+        print(f"Vocabulary: {self.relevant_chars}")
 
         data_collator = DataCollatorForLanguageModeling(
             tokenizer=self.tokenizer, mlm=True, mlm_probability=mlm_probability
         )
 
+        vocab_size = 10 if self.include_deletions else 9
         config = BertConfig(
-            vocab_size=10,
+            vocab_size=vocab_size,
             hidden_size=256,
             num_hidden_layers=8,
             num_attention_heads=8,
@@ -202,12 +217,10 @@ class GLMModel:
         log_history = trainer.state.log_history
         train_losses = [log['loss'] for log in log_history if 'loss' in log]
         eval_losses = [log['eval_loss'] for log in log_history if 'eval_loss' in log]
-
         final_train_loss = train_losses[-1] if train_losses else float('nan')
         final_val_loss = eval_losses[-1] if eval_losses else float('nan')
 
         self._save_metadata(epochs, final_train_loss, final_val_loss)
-
         self.plot_training_and_validation_curves(log_history,
                                                  save_path=os.path.join(self.model_path, "training_curves.png"))
         history_path = os.path.join(self.model_path, "training_history.json")
@@ -252,7 +265,7 @@ class GLMModel:
         if debug:
             print(f"\n--- Debug Info for position {position} ---")
             print(f"Original sequence: {sequence}")
-            print(f"Masked sequence:   {input_str}")
+            print(f"Masked sequence: {input_str}")
             print(f"Original char at pos {position}: '{original_char}'")
             print(f"Token IDs: {input_ids.tolist()}")
             if hasattr(inputs, 'attention_mask'):
@@ -312,7 +325,6 @@ class GLMModel:
 
     def load_and_plot_history(self, custom_save_path=None):
         history_path = os.path.join(self.model_path, "training_history.json")
-
         if not os.path.exists(history_path):
             print(f"No training history found at {history_path}")
             return
@@ -322,7 +334,6 @@ class GLMModel:
 
         save_path = custom_save_path or os.path.join(self.model_path, "training_curves_replotted.png")
         self.plot_training_and_validation_curves(log_history, save_path=save_path)
-
         return log_history
 
     def _save_training_history(self, log_history, save_path):
@@ -398,11 +409,9 @@ class GLMModel:
             ax2.set_title('Learning Rate (No Data)', fontsize=12)
 
         plt.tight_layout()
-
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
             print(f"Training curves saved to {save_path}")
-
         plt.show()
 
         print(f"\nTraining Summary:")
@@ -412,19 +421,39 @@ class GLMModel:
             print(f"Best validation loss: {min(eval_losses):.4f}")
 
     @staticmethod
-    def create_tokenizer():
-        vocab = {
-            "[PAD]": 0,
-            "[UNK]": 1,
-            "[CLS]": 2,
-            "[SEP]": 3,
-            "[MASK]": 4,
-            "A": 5,
-            "C": 6,
-            "G": 7,
-            "T": 8,
-            "-": 9
-        }
+    def create_tokenizer(include_deletions=True):
+        """
+        Create a tokenizer with or without deletion token.
+
+        Args:
+            include_deletions: If True, include '-' in vocabulary. If False, exclude it.
+        """
+        if include_deletions:
+            vocab = {
+                "[PAD]": 0,
+                "[UNK]": 1,
+                "[CLS]": 2,
+                "[SEP]": 3,
+                "[MASK]": 4,
+                "A": 5,
+                "C": 6,
+                "G": 7,
+                "T": 8,
+                "-": 9
+            }
+        else:
+            # Baseline model without deletions
+            vocab = {
+                "[PAD]": 0,
+                "[UNK]": 1,
+                "[CLS]": 2,
+                "[SEP]": 3,
+                "[MASK]": 4,
+                "A": 5,
+                "C": 6,
+                "G": 7,
+                "T": 8
+            }
 
         tokenizer = Tokenizer(models.WordLevel(vocab=vocab, unk_token="[UNK]"))
         tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern="", behavior="isolated")
