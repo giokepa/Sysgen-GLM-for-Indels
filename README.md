@@ -1,16 +1,25 @@
 # Project6 – DNA GLM (Indels) 
 
-generate_data.ipynb can be used to generate data for training and testing. 
+generate_data.ipynb can be used to generate data for training and testing etc (evaluation as well).... 
 
 visualize_data.ipynb can be used to train the model and visualize reconstruction of the model.
 
-This repository contains my end-to-end workflow for testing a trained DNA BERT/GLM model on:
-1) **Reconstruction plots** (per-position reconstruction probabilities)  
-2) **Model-level evaluation on a validation split** (MLM loss + perplexity)  
-3) **Ref vs. Alt scoring** (delta likelihood + influence / probability shift)  
-4) **Dependency maps** (how much a deletion at position *i* changes predictions at position *j*)
+# EVALUATION PART ONLY
 
-Everything is built to run locally in PyCharm and also headless (cluster-safe), because all plots use a non-interactive Matplotlib backend (`Agg`) and are saved directly to disk.
+- Uses TWO FASTA files (REF + ALT) that share the same ordering / seq_id:
+  - **REFERENCE: no-deletions reference sequences**
+    **ALTERNATIVE: corresponding alternative sequences (with '-' etc.), SAME INDEX as REFERENCE**
+- Samples EXACTLY:
+    * 100 sequences with label=A_only
+    * 100 sequences with label=B_only
+    * 100 sequences with label=both
+  Sampling is random (seeded) but indices are then sorted ascending (smallest -> biggest).
+- Evaluates ONLY WITHIN MOTIF POSITIONS for:
+    * **Cross-entropy (CE) (masked pseudo-CE)**
+    * **PLL "fitness" (mean log-prob)**
+    * **elta log-likelihood (delta), and ref_sum/alt_sum (ALL motif-only)**
+    * **Influence score: perturbations (query positions where ref!=alt) -> target positions ONLY within motif**
+
 
 ---
 
@@ -21,45 +30,21 @@ Everything is built to run locally in PyCharm and also headless (cluster-safe), 
  - `tokenizer.json`
  - `training_metadata.json`
  - model weights (`pytorch_model.bin` or `model.safetensors`)
-
+ - etc...
 - A FASTA dataset file used for loading / sampling sequences  
  (same format as the training FASTA, with metadata stored in the header line)
 
 ---
 
-## What each script does
-
-### `main_all_in_one.py`  “run everything”
-This is the main integration script. It:
-- loads the trained `GLMModel`
-- creates a **reconstruction plot** for a chosen example sequence
-- builds a reproducible **train/val split**
-- runs **MLM validation quality** (loss + perplexity)
-- runs **ref vs alt scoring** (delta-likelihood + influence score)
-- generates **dependency maps** for many sequences (e.g. 50 `A_only` + 50 `B_only`)
-- writes all outputs into one result folder (plots + CSVs + manifest)
-
-Outputs typically include:
-- `reconstruction_*.png`
-- `model_quality.csv`
-- `eval_ref_alt.csv`
-- `dependency_maps/` folder:
- - `.png` heatmaps
- - `.npy` matrices
- - `manifest.csv` pointing to all files
- - `*_input.txt` storing the exact sequence used (for traceability)
-
----
-
 ### `stats.py`
 This script is used to summarize dataset characteristics and/or output distributions.
-I use it after `main_all_in_one.py` to quickly sanity-check:
+I use it after `main_all_in_one_evaluation.py` to quickly sanity-check:
 - how many sequences per label exist
 - deletion statistics
 - motif position distributions
 - any basic CSV summaries that help interpret results
 
-(So: **main runs the experiments**, **stats summarizes the data/results**.)
+(So: **main runs the evaluation part**, **stats summarizes the data/results**.)
 
 ---
 
@@ -69,4 +54,4 @@ I use it after `main_all_in_one.py` to quickly sanity-check:
 From the project root:
 
 ```bash
-python3 main_all_in_one.py
+python3 main_all_in_one_evaluation.py and then clean.py and plots_evaluation.py
