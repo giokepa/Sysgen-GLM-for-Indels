@@ -44,7 +44,7 @@ TRAIN_FASTA_FOR_MODEL = "/Users/amelielaura/Documents/Project6/data/augumented_s
 EVAL_REF_FASTA = "/Users/amelielaura/Documents/Project6/data/sequence_size10000_length150_deletions0_nodeletionseq1_seed538.fasta"
 EVAL_ALT_FASTA = "/Users/amelielaura/Documents/Project6/data/augmented_fromfile_fixedlen_sequence_size10000_length150_deletions0.2_nodeletionseq0.1_seed538.fasta"
 
-OUT_DIR = "/Users/amelielaura/Documents/Project6/outputs/eval_only_motif_based"
+OUT_DIR = "/Users/amelielaura/Documents/Project6/outputs/eval_only_motif_based/evaluation"
 
 GLOBAL_SEED = 727
 
@@ -63,7 +63,7 @@ COMPUTE_INFLUENCE = True
 # ============================================================
 # Utilities
 # ============================================================
-def ensure_dir(path: str) -> None:
+def ensure_directory(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
@@ -416,9 +416,9 @@ def main() -> None:
     np.random.seed(GLOBAL_SEED)
     torch.manual_seed(GLOBAL_SEED)
 
-    ensure_dir(OUT_DIR)
+    ensure_directory(OUT_DIR)
     out_eval = os.path.join(OUT_DIR, "evaluation")
-    ensure_dir(out_eval)
+    ensure_directory(out_eval)
 
     print("Loading GLMModel...")
     glm = GLMModel(model_path=MODEL_DIR, fasta_file=TRAIN_FASTA_FOR_MODEL, force_retrain=False)
@@ -535,4 +535,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
