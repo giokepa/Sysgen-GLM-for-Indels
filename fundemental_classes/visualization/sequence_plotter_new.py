@@ -7,8 +7,9 @@ import numpy as np
 from fundemental_classes.dna_dataset import DNADataset
 
 
-def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05):
-    df = pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T', '-'])
+def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05, with_deletions=True):
+    df = pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T', '-']) if (
+        with_deletions) else pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T'])
     ic_df = logomaker.transform_matrix(df, from_type='probability', to_type='information')
 
     fig, ax = plt.subplots(figsize=(15, 2.5))
@@ -52,7 +53,7 @@ def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05
         s = s ** gamma
         return min_len + s * (max_len - min_len)
 
-    letters = ['A', 'C', 'G', 'T', '-']
+    letters = ['A', 'C', 'G', 'T', '-'] if with_deletions else ['A', 'C', 'G', 'T']
     L = min(len(ic_df), seq_len)
 
     for pos in range(L):

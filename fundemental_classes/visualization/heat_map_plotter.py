@@ -8,9 +8,10 @@ from transformers import DefaultDataCollator
 
 
 class DependencyMapGenerator:
-    def __init__(self, glm_model_wrapper, type):
+    def __init__(self, glm_model_wrapper, type, use_deletions=True):
         # type can be 'snp' or 'indel'
         self.type = type
+        self.use_deletions = use_deletions
         self.tokenizer = glm_model_wrapper.tokenizer
         self.device = glm_model_wrapper.device
         self.model = glm_model_wrapper.model.to(self.device)
@@ -18,8 +19,9 @@ class DependencyMapGenerator:
 
         self.add_special_tokens = getattr(glm_model_wrapper, 'add_special_tokens', True)
 
-        self.nuc_table = {"-": 0, "A": 1, "C": 2, "G": 3, "T": 4}
-        self.acgt_idxs = [self.tokenizer.get_vocab()[nuc] for nuc in ['-', 'A', 'C', 'G', 'T']]
+        self.nuc_table = {"-": 0, "A": 1, "C": 2, "G": 3, "T": 4} if use_deletions else {"A": 0, "C": 1, "G": 2, "T": 3}
+        self.acgt_idxs = [self.tokenizer.get_vocab()[nuc] for nuc in ['-', 'A', 'C', 'G', 'T']] if use_deletions else \
+            [self.tokenizer.get_vocab()[nuc] for nuc in ['A', 'C', 'G', 'T']]
 
     def _mutate_sequence(self, seq):
         seq = seq.upper()
@@ -32,15 +34,17 @@ class DependencyMapGenerator:
 
         mutate_until_position = len(seq)
 
-        if self.type == 'snp': # substitution of ACGT to other ACGT
+        if self.type == 'snp':  # substitution of ACGT to other ACGT
             for i in range(mutate_until_position):
                 for nuc in ['A', 'C', 'G', 'T']:
-                        if nuc != seq[i] and seq[i] in ['A', 'C', 'G', 'T']:
-                            mutated_sequences['seq'].append(seq[:i] + nuc + seq[i + 1:])
-                            mutated_sequences['mutation_pos'].append(i)
-                            mutated_sequences['nuc'].append(nuc)
-                            mutated_sequences['var_nt_idx'].append(self.nuc_table[nuc])
-        elif self.type == 'indel': # mutate sequence by replacing ACGT with '-'
+                    if nuc != seq[i] and seq[i] in ['A', 'C', 'G', 'T']:
+                        mutated_sequences['seq'].append(seq[:i] + nuc + seq[i + 1:])
+                        mutated_sequences['mutation_pos'].append(i)
+                        mutated_sequences['nuc'].append(nuc)
+                        mutated_sequences['var_nt_idx'].append(self.nuc_table[nuc])
+        elif self.type == 'indel':  # mutate sequence by replacing ACGT with '-'
+            if self.use_deletions is False:
+                raise ValueError("Indel mutation type requires use_deletions=True")
             for i in range(mutate_until_position):
                 if seq[i] in ['A', 'C', 'G', 'T']:
                     mutated_sequences['seq'].append(seq[:i] + '-' + seq[i + 1:])
@@ -113,7 +117,7 @@ class DependencyMapGenerator:
         snp_reconstruct = snp_reconstruct / snp_reconstruct.sum(axis=-1)[:, :, np.newaxis]
 
         seq_len = snp_reconstruct.shape[1]
-        snp_effect = np.zeros((seq_len, seq_len, 5, 5))
+        snp_effect = np.zeros((seq_len, seq_len, 4, 4))
 
         reference_probs = snp_reconstruct[dataset[dataset['nuc'] == 'real sequence'].index[0]]
 

@@ -6,8 +6,9 @@ import pandas as pd
 from fundemental_classes.dna_dataset import DNADataset
 
 
-def plot(header, sequence, prob_matrix, motif_length=10):
-    df = pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T', '-'])
+def plot(header, sequence, prob_matrix, motif_length=10, with_deletions=True):
+    df = pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T', '-']) if (
+        with_deletions) else pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T'])
     ic_df = logomaker.transform_matrix(df, from_type='probability', to_type='information')
 
     # Plot
