@@ -117,7 +117,7 @@ class DependencyMapGenerator:
         snp_reconstruct = snp_reconstruct / snp_reconstruct.sum(axis=-1)[:, :, np.newaxis]
 
         seq_len = snp_reconstruct.shape[1]
-        snp_effect = np.zeros((seq_len, seq_len, 4, 4))
+        snp_effect = np.zeros((seq_len, seq_len, 5 if self.use_deletions else 4, 5 if self.use_deletions else 4))
 
         reference_probs = snp_reconstruct[dataset[dataset['nuc'] == 'real sequence'].index[0]]
 
