@@ -97,7 +97,7 @@ class DependencyMapGenerator:
         if model_seq_len == input_len:
             pass
         elif model_seq_len == input_len + 2:
-            snp_reconstruct = snp_reconstruct[:, 1:-1, :]  # Remove [CLS] and [SEP]
+            snp_reconstruct = snp_reconstruct[:, 1:-1, :]
         else:
             diff = model_seq_len - input_len
             if diff > 0 and diff % 2 == 0:
