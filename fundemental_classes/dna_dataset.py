@@ -42,7 +42,26 @@ class DNADataset(torch.utils.data.Dataset):
                 sequences.append(current_seq)
 
         return sequences
-
+    def get_raw_sequence(self, idx):
+        with open(self.fasta_file, 'r') as f:
+            current_idx = -1
+            current_seq = ""
+            for line in f:
+                line = line.strip()
+                if line.startswith(">"):
+                    if current_seq:
+                        current_idx += 1
+                        if current_idx == idx:
+                            return header, current_seq
+                    header = line
+                    current_seq = ""
+                else:
+                    current_seq += line
+            if current_seq:
+                current_idx += 1
+                if current_idx == idx:
+                    return header, current_seq
+        raise IndexError("Index out of range")
     @staticmethod
     def parse_header(header_str):
         pos_a = re.search(r"posAmotif=(\d+|None)", header_str)
