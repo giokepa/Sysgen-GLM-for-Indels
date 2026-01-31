@@ -80,7 +80,7 @@ class GLMModel:
                 "config.json": os.path.join(self.model_path, "config.json"),
                 "model weights": os.path.join(self.model_path, "pytorch_model.bin"),
                 "tokenizer": os.path.join(self.model_path, "tokenizer.json"),
-                "training_history": os.path.join(self.model_path, "training_history.json")
+                #"training_history": os.path.join(self.model_path, "training_history.json")
             }
             if not os.path.exists(required_files["model weights"]):
                 required_files["model weights"] = os.path.join(self.model_path, "model.safetensors")
