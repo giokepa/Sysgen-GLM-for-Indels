@@ -7,11 +7,10 @@ import numpy as np
 from fundemental_classes.dna_dataset import DNADataset
 
 
-def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05):     # letters with IC <= this are moved "below" 
+def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05):
     df = pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T', '-'])
     ic_df = logomaker.transform_matrix(df, from_type='probability', to_type='information')
 
-    # Plot
     fig, ax = plt.subplots(figsize=(15, 2.5))
 
     dna_colors = {'A': 'green', 'C': 'blue', 'G': 'orange', 'T': 'red', '-': 'black'}
@@ -27,41 +26,43 @@ def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05
     ax.xaxis.set_minor_locator(plt.MultipleLocator(1))
     ax.tick_params(axis='x', which='both', labelbottom=False, bottom=True, length=3)
 
-    start_a, start_b = DNADataset.parse_header(header)
-    y_line = -0.05
+    motif_positions = parse_motif_positions(header)
 
+    y_line = -0.05
     ax.plot([0, seq_len], [y_line, y_line], color='black', lw=1, clip_on=False)
 
     def draw_motif_box(start_idx, label):
-        if start_idx is None: return
         rect = patches.Rectangle((start_idx, y_line - 0.5), motif_length, 0.4,
                                  linewidth=1, edgecolor='black', facecolor='white', clip_on=False)
         ax.add_patch(rect)
         ax.text(start_idx + motif_length / 2, y_line - 0.3, label,
                 ha='center', va='center', fontsize=8, fontweight='bold', clip_on=False)
 
-    draw_motif_box(start_a, "Motif A")
-    draw_motif_box(start_b, "Motif B")
+    if 'A' in motif_positions:
+        for pos in motif_positions['A']:
+            draw_motif_box(pos, "Motif A")
+
+    if 'B' in motif_positions:
+        for pos in motif_positions['B']:
+            draw_motif_box(pos, "Motif B")
 
     def inv_h(v, thr, min_len, max_len, gamma=2.0):
-        s = (thr - v) / max(thr, 1e-12)   # normalize to [0,1]
+        s = (thr - v) / max(thr, 1e-12)
         s = float(np.clip(s, 0.0, 1.0))
-        s = s ** gamma                   # amplify differences
+        s = s ** gamma
         return min_len + s * (max_len - min_len)
 
     letters = ['A', 'C', 'G', 'T', '-']
     L = min(len(ic_df), seq_len)
 
     for pos in range(L):
-        # collect "small" letters at this position
         small = [(letter, float(ic_df.loc[pos, letter]))
-                for letter in letters
-                if 0 < float(ic_df.loc[pos, letter]) <= small_ic_threshold]
+                 for letter in letters
+                 if 0 < float(ic_df.loc[pos, letter]) <= small_ic_threshold]
 
         if not small:
             continue
 
-        # purely visual order: smallest IC first
         small.sort(key=lambda x: x[1])
 
         y_cursor = y_line
@@ -69,14 +70,14 @@ def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05
             h = inv_h(
                 v,
                 small_ic_threshold,
-                min_len=0.01,    # tune this
-                max_len=0.8,    # tune this
-                gamma=4.0        # tune this (2–4 is usually good)
+                min_len=0.01,
+                max_len=0.8,
+                gamma=4.0
             )
 
             rect = patches.Rectangle(
-                (pos - 0.5, y_cursor - h),  # center at pos
-                0.7,  # width
+                (pos - 0.5, y_cursor - h),
+                0.7,
                 h,
                 linewidth=0,
                 facecolor=dna_colors[letter],
@@ -85,8 +86,23 @@ def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05
             ax.add_patch(rect)
             y_cursor -= h
 
-
     clean_title = header.split('|')[0].replace(">", "")
     plt.title(f"Sequence: {clean_title}", fontsize=10)
     plt.tight_layout()
     plt.show()
+
+
+def parse_motif_positions(header):
+    motif_positions = {}
+
+    parts = header.split('|')
+
+    for part in parts:
+        if 'posAmotif=' in part:
+            pos_str = part.split('=')[1]
+            motif_positions['A'] = [int(x) for x in pos_str.split(',')]
+        elif 'posBmotif=' in part:
+            pos_str = part.split('=')[1]
+            motif_positions['B'] = [int(x) for x in pos_str.split(',')]
+
+    return motif_positions
