@@ -11,15 +11,23 @@ def plot(header, sequence, prob_matrix, motif_length=10, with_deletions=True):
         with_deletions) else pd.DataFrame(prob_matrix, columns=['A', 'C', 'G', 'T'])
     ic_df = logomaker.transform_matrix(df, from_type='probability', to_type='information')
 
-    # Plot
     fig, ax = plt.subplots(figsize=(15, 2.5))
 
     dna_colors = {'A': 'green', 'C': 'blue', 'G': 'orange', 'T': 'red', '-': 'black'}
 
     logo = logomaker.Logo(ic_df, ax=ax, color_scheme=dna_colors, vpad=0.0, width=1.0)
     logo.style_spines(spines=['top', 'right', 'left'], visible=False)
+    logo.style_glyphs_in_sequence(sequence=sequence, color='darkorange')
     ax.spines['left'].set_visible(True)
     ax.set_ylabel("Reconstruction\n(scaled by IC)", fontsize=9)
+
+    y_max = ax.get_ylim()[1]
+    for i, nucleotide in enumerate(sequence):
+        color = dna_colors.get(nucleotide, 'black')
+        ax.text(i + 0.5, y_max * 1.05, nucleotide,
+                ha='center', va='bottom',
+                fontsize=10, fontweight='bold',
+                color=color, family='monospace')
 
     seq_len = len(sequence)
     ax.set_xlim(0, seq_len)
@@ -27,7 +35,7 @@ def plot(header, sequence, prob_matrix, motif_length=10, with_deletions=True):
     ax.xaxis.set_minor_locator(plt.MultipleLocator(1))
     ax.tick_params(axis='x', which='both', labelbottom=False, bottom=True, length=3)
 
-    motif_positions = parse_motif_positions(header)
+    motif_positions = DNADataset.parse_motif_positions(header)
     y_line = -0.05
     ax.plot([0, seq_len], [y_line, y_line], color='black', lw=1, clip_on=False)
 
@@ -50,19 +58,3 @@ def plot(header, sequence, prob_matrix, motif_length=10, with_deletions=True):
     plt.title(f"Sequence: {clean_title}", fontsize=10)
     plt.tight_layout()
     plt.show()
-
-
-def parse_motif_positions(header):
-    motif_positions = {}
-
-    parts = header.split('|')
-
-    for part in parts:
-        if 'posAmotif=' in part:
-            pos_str = part.split('=')[1]
-            motif_positions['A'] = [int(x) for x in pos_str.split(',')]
-        elif 'posBmotif=' in part:
-            pos_str = part.split('=')[1]
-            motif_positions['B'] = [int(x) for x in pos_str.split(',')]
-
-    return motif_positions
