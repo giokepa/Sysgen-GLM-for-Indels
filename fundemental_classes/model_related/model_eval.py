@@ -14,18 +14,90 @@ class ModelEvaluator:
         self.baseline_model = baseline_model
         self.deletion_model = deletion_model
         self.results = {
-            'baseline': {'cross_entropies': [], 'perplexities': [], 'sequence_ids': []},
-            'deletion': {'cross_entropies': [], 'perplexities': [], 'sequence_ids': []}
+            'baseline': {
+                'cross_entropies': [],
+                'perplexities': [],
+                'sequence_ids': [],
+                'motif_cross_entropies': []
+            },
+            'deletion': {
+                'cross_entropies': [],
+                'perplexities': [],
+                'sequence_ids': [],
+                'motif_cross_entropies': []
+            },
+            'baseline_4nt': {
+                'cross_entropies': [],
+                'perplexities': [],
+                'sequence_ids': []
+            },
+            'deletion_4nt': {
+                'cross_entropies': [],
+                'perplexities': [],
+                'sequence_ids': []
+            }
         }
 
-    def compute_cross_entropy(self, model: GLMModel, sequence: str) -> float:
+    def extract_motif_positions(self, header: str) -> List[Tuple[int, int]]:
+        motif_positions = []
+        parts = header.split('|')
+
+        motif_length = 6
+
+        for part in parts:
+            if 'posAmotif=' in part:
+                pos_str = part.split('=')[1]
+                if pos_str.strip().lower() == 'none' or not pos_str.strip():
+                    continue
+                for pos in pos_str.split(','):
+                    pos = pos.strip()
+                    if pos and pos.lower() != 'none':
+                        try:
+                            start = int(pos)
+                            motif_positions.append((start, start + motif_length))
+                        except ValueError:
+                            continue
+            elif 'posBmotif=' in part:
+                pos_str = part.split('=')[1]
+                if pos_str.strip().lower() == 'none' or not pos_str.strip():
+                    continue
+                for pos in pos_str.split(','):
+                    pos = pos.strip()
+                    if pos and pos.lower() != 'none':
+                        try:
+                            start = int(pos)
+                            motif_positions.append((start, start + motif_length))
+                        except ValueError:
+                            continue
+
+        return motif_positions
+
+    def compute_cross_entropy(self, model: GLMModel, sequence: str,
+                              motif_positions: List[Tuple[int, int]] = None,
+                              four_nt_only: bool = False) -> float:
+
         total_ce = 0.0
         valid_positions = 0
 
-        for pos in range(len(sequence)):
+        if motif_positions and len(motif_positions) > 0:
+            positions_to_eval = []
+            for start, end in motif_positions:
+                positions_to_eval.extend(range(start, min(end, len(sequence))))
+        else:
+            positions_to_eval = range(len(sequence))
+
+        if four_nt_only:
+            valid_chars = ['A', 'C', 'G', 'T']
+        else:
+            valid_chars = model.relevant_chars
+
+        for pos in positions_to_eval:
+            if pos >= len(sequence):
+                continue
+
             true_char = sequence[pos]
 
-            if true_char not in model.relevant_chars:
+            if true_char not in valid_chars:
                 continue
 
             probs = model.predict_position(sequence, pos, debug=False, dna_only=True)
@@ -43,104 +115,136 @@ class ModelEvaluator:
 
     def evaluate_dataset(self, test_fasta_path: str, model_type: str, max_sequences: int = None):
         model = self.baseline_model if model_type == 'baseline' else self.deletion_model
+        results_key_4nt = 'baseline_4nt' if model_type == 'baseline' else 'deletion_4nt'
 
         print(f"\n{'=' * 60}")
         print(f"Evaluating {model_type.upper()} model on: {test_fasta_path}")
         print(f"{'=' * 60}")
 
         dataset = DNADataset(test_fasta_path, model.tokenizer, model.max_length)
-
         n_sequences = len(dataset) if max_sequences is None else min(max_sequences, len(dataset))
 
         for idx in range(n_sequences):
             header, sequence = dataset.get_raw_sequence(idx)
 
-            ce = self.compute_cross_entropy(model, sequence)
-            perplexity = self.compute_perplexity(ce)
+            motif_positions = self.extract_motif_positions(header)
 
-            self.results[model_type]['cross_entropies'].append(ce)
-            self.results[model_type]['perplexities'].append(perplexity)
+            motif_ce = self.compute_cross_entropy(model, sequence, motif_positions=motif_positions, four_nt_only=False)
+            motif_perplexity = self.compute_perplexity(motif_ce)
+
+            ce_4nt = self.compute_cross_entropy(model, sequence, motif_positions=None, four_nt_only=True)
+            perplexity_4nt = self.compute_perplexity(ce_4nt)
+
+            self.results[model_type]['motif_cross_entropies'].append(motif_ce)
+            self.results[model_type]['cross_entropies'].append(motif_ce)
+            self.results[model_type]['perplexities'].append(motif_perplexity)
             self.results[model_type]['sequence_ids'].append(header.split('|')[0].replace('>', ''))
+
+            self.results[results_key_4nt]['cross_entropies'].append(ce_4nt)
+            self.results[results_key_4nt]['perplexities'].append(perplexity_4nt)
+            self.results[results_key_4nt]['sequence_ids'].append(header.split('|')[0].replace('>', ''))
 
             if (idx + 1) % 50 == 0:
                 print(f"Processed {idx + 1}/{n_sequences} sequences...")
 
-        ce_array = np.array(self.results[model_type]['cross_entropies'])
+        motif_ce_array = np.array(self.results[model_type]['motif_cross_entropies'])
         perp_array = np.array(self.results[model_type]['perplexities'])
 
-        print(f"\n{model_type.upper()} Model Results:")
-        print(f"  Cross-Entropy: {ce_array.mean():.4f} ± {ce_array.std():.4f}")
+        print(f"\n{model_type.upper()} Model Results (MOTIF-ONLY):")
+        print(f"  Cross-Entropy: {motif_ce_array.mean():.4f} ± {motif_ce_array.std():.4f}")
         print(f"  Perplexity: {perp_array.mean():.4f} ± {perp_array.std():.4f}")
-        print(f"  Min CE: {ce_array.min():.4f}, Max CE: {ce_array.max():.4f}")
+        print(f"  Min CE: {motif_ce_array.min():.4f}, Max CE: {motif_ce_array.max():.4f}")
+
+        ce_4nt_array = np.array(self.results[results_key_4nt]['cross_entropies'])
+        print(f"\n{model_type.upper()} Model Results (4-NUCLEOTIDE COMPARISON):")
+        print(f"  Cross-Entropy: {ce_4nt_array.mean():.4f} ± {ce_4nt_array.std():.4f}")
 
     def compare_models(self) -> Dict:
-        baseline_ce = np.array(self.results['baseline']['cross_entropies'])
-        deletion_ce = np.array(self.results['deletion']['cross_entropies'])
+        print(f"\n{'=' * 60}")
+        print("STATISTICAL COMPARISON (MOTIF-ONLY)")
+        print(f"{'=' * 60}")
+
+        baseline_ce = np.array(self.results['baseline']['motif_cross_entropies'])
+        deletion_ce = np.array(self.results['deletion']['motif_cross_entropies'])
 
         if len(baseline_ce) == 0 or len(deletion_ce) == 0:
             raise ValueError("Both models must be evaluated before comparison")
 
-        print(f"\n{'=' * 60}")
-        print("STATISTICAL COMPARISON")
-        print(f"{'=' * 60}")
-
-        comparison_results = {}
+        comparison_results = {'motif_only': {}, '4nt_comparison': {}}
 
         if len(baseline_ce) == len(deletion_ce):
             t_stat, t_pvalue = stats.ttest_rel(baseline_ce, deletion_ce)
-            comparison_results['paired_ttest'] = {
+            comparison_results['motif_only']['paired_ttest'] = {
                 'statistic': float(t_stat),
                 'pvalue': float(t_pvalue),
                 'significant': t_pvalue < 0.05
             }
-            print(f"\nPaired t-test:")
+            print(f"\nPaired t-test (Motif-only):")
             print(f"  t-statistic: {t_stat:.4f}")
-            print(f"  p-value: {t_pvalue:.6f}")
+            print(f"  p-value: {t_pvalue:.6e}")
             print(f"  Significant (α=0.05): {t_pvalue < 0.05}")
 
         if len(baseline_ce) == len(deletion_ce):
             w_stat, w_pvalue = stats.wilcoxon(baseline_ce, deletion_ce)
-            comparison_results['wilcoxon'] = {
+            comparison_results['motif_only']['wilcoxon'] = {
                 'statistic': float(w_stat),
                 'pvalue': float(w_pvalue),
                 'significant': w_pvalue < 0.05
             }
-            print(f"\nWilcoxon signed-rank test:")
+            print(f"\nWilcoxon signed-rank test (Motif-only):")
             print(f"  W-statistic: {w_stat:.4f}")
-            print(f"  p-value: {w_pvalue:.6f}")
+            print(f"  p-value: {w_pvalue:.6e}")
             print(f"  Significant (α=0.05): {w_pvalue < 0.05}")
-
-        u_stat, u_pvalue = stats.mannwhitneyu(baseline_ce, deletion_ce, alternative='two-sided')
-        comparison_results['mann_whitney'] = {
-            'statistic': float(u_stat),
-            'pvalue': float(u_pvalue),
-            'significant': u_pvalue < 0.05
-        }
-        print(f"\nMann-Whitney U test:")
-        print(f"  U-statistic: {u_stat:.4f}")
-        print(f"  p-value: {u_pvalue:.6f}")
-        print(f"  Significant (α=0.05): {u_pvalue < 0.05}")
 
         mean_diff = baseline_ce.mean() - deletion_ce.mean()
         pooled_std = np.sqrt((baseline_ce.std() ** 2 + deletion_ce.std() ** 2) / 2)
         cohens_d = mean_diff / pooled_std
-        comparison_results['effect_size'] = {
+        comparison_results['motif_only']['effect_size'] = {
             'cohens_d': float(cohens_d),
             'interpretation': self._interpret_cohens_d(cohens_d)
         }
         print(f"\nEffect Size (Cohen's d): {cohens_d:.4f}")
         print(f"  Interpretation: {self._interpret_cohens_d(cohens_d)}")
 
-        mean_diff = baseline_ce.mean() - deletion_ce.mean()
-        se_diff = np.sqrt(baseline_ce.var() / len(baseline_ce) + deletion_ce.var() / len(deletion_ce))
-        ci_95 = 1.96 * se_diff
-        comparison_results['mean_difference'] = {
-            'difference': float(mean_diff),
-            'ci_lower': float(mean_diff - ci_95),
-            'ci_upper': float(mean_diff + ci_95)
+        print(f"\n{'=' * 60}")
+        print("4-NUCLEOTIDE COMPARISON (Fair Comparison)")
+        print(f"{'=' * 60}")
+
+        baseline_4nt = np.array(self.results['baseline_4nt']['cross_entropies'])
+        deletion_4nt = np.array(self.results['deletion_4nt']['cross_entropies'])
+
+        if len(baseline_4nt) == len(deletion_4nt):
+            t_stat_4nt, t_pvalue_4nt = stats.ttest_rel(baseline_4nt, deletion_4nt)
+            comparison_results['4nt_comparison']['paired_ttest'] = {
+                'statistic': float(t_stat_4nt),
+                'pvalue': float(t_pvalue_4nt),
+                'significant': t_pvalue_4nt < 0.05
+            }
+            print(f"\nPaired t-test (4-nucleotide):")
+            print(f"  t-statistic: {t_stat_4nt:.4f}")
+            print(f"  p-value: {t_pvalue_4nt:.6e}")
+            print(f"  Significant (α=0.05): {t_pvalue_4nt < 0.05}")
+
+            w_stat_4nt, w_pvalue_4nt = stats.wilcoxon(baseline_4nt, deletion_4nt)
+            comparison_results['4nt_comparison']['wilcoxon'] = {
+                'statistic': float(w_stat_4nt),
+                'pvalue': float(w_pvalue_4nt),
+                'significant': w_pvalue_4nt < 0.05
+            }
+            print(f"\nWilcoxon signed-rank test (4-nucleotide):")
+            print(f"  W-statistic: {w_stat_4nt:.4f}")
+            print(f"  p-value: {w_pvalue_4nt:.6e}")
+            print(f"  Significant (α=0.05): {w_pvalue_4nt < 0.05}")
+
+        mean_diff_4nt = baseline_4nt.mean() - deletion_4nt.mean()
+        pooled_std_4nt = np.sqrt((baseline_4nt.std() ** 2 + deletion_4nt.std() ** 2) / 2)
+        cohens_d_4nt = mean_diff_4nt / pooled_std_4nt
+        comparison_results['4nt_comparison']['effect_size'] = {
+            'cohens_d': float(cohens_d_4nt),
+            'interpretation': self._interpret_cohens_d(cohens_d_4nt)
         }
-        print(f"\nMean Difference (Baseline - Deletion): {mean_diff:.4f}")
-        print(f"  95% CI: [{mean_diff - ci_95:.4f}, {mean_diff + ci_95:.4f}]")
+        print(f"\nEffect Size (Cohen's d): {cohens_d_4nt:.4f}")
+        print(f"  Interpretation: {self._interpret_cohens_d(cohens_d_4nt)}")
 
         return comparison_results
 
@@ -159,23 +263,39 @@ class ModelEvaluator:
     def export_results(self, output_path: str):
         output_data = {
             'baseline': {
-                'cross_entropies': [float(x) for x in self.results['baseline']['cross_entropies']],
+                'motif_cross_entropies': [float(x) for x in self.results['baseline']['motif_cross_entropies']],
                 'perplexities': [float(x) for x in self.results['baseline']['perplexities']],
                 'sequence_ids': self.results['baseline']['sequence_ids'],
                 'summary': {
-                    'mean_ce': float(np.mean(self.results['baseline']['cross_entropies'])),
-                    'std_ce': float(np.std(self.results['baseline']['cross_entropies'])),
+                    'mean_motif_ce': float(np.mean(self.results['baseline']['motif_cross_entropies'])),
+                    'std_motif_ce': float(np.std(self.results['baseline']['motif_cross_entropies'])),
                     'mean_perplexity': float(np.mean(self.results['baseline']['perplexities']))
                 }
             },
             'deletion': {
-                'cross_entropies': [float(x) for x in self.results['deletion']['cross_entropies']],
+                'motif_cross_entropies': [float(x) for x in self.results['deletion']['motif_cross_entropies']],
                 'perplexities': [float(x) for x in self.results['deletion']['perplexities']],
                 'sequence_ids': self.results['deletion']['sequence_ids'],
                 'summary': {
-                    'mean_ce': float(np.mean(self.results['deletion']['cross_entropies'])),
-                    'std_ce': float(np.std(self.results['deletion']['cross_entropies'])),
+                    'mean_motif_ce': float(np.mean(self.results['deletion']['motif_cross_entropies'])),
+                    'std_motif_ce': float(np.std(self.results['deletion']['motif_cross_entropies'])),
                     'mean_perplexity': float(np.mean(self.results['deletion']['perplexities']))
+                }
+            },
+            'baseline_4nt': {
+                'cross_entropies': [float(x) for x in self.results['baseline_4nt']['cross_entropies']],
+                'sequence_ids': self.results['baseline_4nt']['sequence_ids'],
+                'summary': {
+                    'mean_ce': float(np.mean(self.results['baseline_4nt']['cross_entropies'])),
+                    'std_ce': float(np.std(self.results['baseline_4nt']['cross_entropies']))
+                }
+            },
+            'deletion_4nt': {
+                'cross_entropies': [float(x) for x in self.results['deletion_4nt']['cross_entropies']],
+                'sequence_ids': self.results['deletion_4nt']['sequence_ids'],
+                'summary': {
+                    'mean_ce': float(np.mean(self.results['deletion_4nt']['cross_entropies'])),
+                    'std_ce': float(np.std(self.results['deletion_4nt']['cross_entropies']))
                 }
             }
         }
@@ -186,18 +306,38 @@ class ModelEvaluator:
         print(f"\nResults exported to: {output_path}")
 
     def get_results_dataframe(self) -> pd.DataFrame:
-        baseline_df = pd.DataFrame({
+        baseline_motif_df = pd.DataFrame({
             'sequence_id': self.results['baseline']['sequence_ids'],
             'model': 'baseline',
-            'cross_entropy': self.results['baseline']['cross_entropies'],
+            'comparison_type': 'motif_only',
+            'cross_entropy': self.results['baseline']['motif_cross_entropies'],
             'perplexity': self.results['baseline']['perplexities']
         })
 
-        deletion_df = pd.DataFrame({
+        deletion_motif_df = pd.DataFrame({
             'sequence_id': self.results['deletion']['sequence_ids'],
             'model': 'deletion',
-            'cross_entropy': self.results['deletion']['cross_entropies'],
+            'comparison_type': 'motif_only',
+            'cross_entropy': self.results['deletion']['motif_cross_entropies'],
             'perplexity': self.results['deletion']['perplexities']
         })
 
-        return pd.concat([baseline_df, deletion_df], ignore_index=True)
+        baseline_4nt_df = pd.DataFrame({
+            'sequence_id': self.results['baseline_4nt']['sequence_ids'],
+            'model': 'baseline',
+            'comparison_type': '4nt',
+            'cross_entropy': self.results['baseline_4nt']['cross_entropies'],
+            'perplexity': self.results['baseline_4nt']['perplexities']
+        })
+
+        deletion_4nt_df = pd.DataFrame({
+            'sequence_id': self.results['deletion_4nt']['sequence_ids'],
+            'model': 'deletion',
+            'comparison_type': '4nt',
+            'cross_entropy': self.results['deletion_4nt']['cross_entropies'],
+            'perplexity': self.results['deletion_4nt']['perplexities']
+        })
+
+        return pd.concat([baseline_motif_df, deletion_motif_df,
+                          baseline_4nt_df, deletion_4nt_df], ignore_index=True)
+
