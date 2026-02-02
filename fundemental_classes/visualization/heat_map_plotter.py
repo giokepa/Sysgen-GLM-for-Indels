@@ -7,9 +7,10 @@ from datasets import Dataset
 from transformers import DefaultDataCollator
 
 
+
 class DependencyMapGenerator:
     def __init__(self, glm_model_wrapper, type, use_deletions=True):
-        # type can be 'snp' or 'indel'
+        # type can be 'snp' or 'indel' or removal
         self.type = type
         self.use_deletions = use_deletions
         self.tokenizer = glm_model_wrapper.tokenizer
@@ -22,7 +23,7 @@ class DependencyMapGenerator:
         self.nuc_table = {"-": 0, "A": 1, "C": 2, "G": 3, "T": 4} if use_deletions else {"A": 0, "C": 1, "G": 2, "T": 3}
         self.acgt_idxs = [self.tokenizer.get_vocab()[nuc] for nuc in ['-', 'A', 'C', 'G', 'T']] if use_deletions else \
             [self.tokenizer.get_vocab()[nuc] for nuc in ['A', 'C', 'G', 'T']]
-
+       
     def _mutate_sequence(self, seq):
         seq = seq.upper()
         mutated_sequences = {'seq': [], 'mutation_pos': [], 'nuc': [], 'var_nt_idx': []}
@@ -34,15 +35,15 @@ class DependencyMapGenerator:
 
         mutate_until_position = len(seq)
 
-        if self.type == 'snp':  # substitution of ACGT to other ACGT
+        if self.type == 'snp': # substitution of ACGT to other ACGT
             for i in range(mutate_until_position):
                 for nuc in ['A', 'C', 'G', 'T']:
-                    if nuc != seq[i] and seq[i] in ['A', 'C', 'G', 'T']:
-                        mutated_sequences['seq'].append(seq[:i] + nuc + seq[i + 1:])
-                        mutated_sequences['mutation_pos'].append(i)
-                        mutated_sequences['nuc'].append(nuc)
-                        mutated_sequences['var_nt_idx'].append(self.nuc_table[nuc])
-        elif self.type == 'indel':  # mutate sequence by replacing ACGT with '-'
+                        if nuc != seq[i] and seq[i] in ['A', 'C', 'G', 'T']:
+                            mutated_sequences['seq'].append(seq[:i] + nuc + seq[i + 1:])
+                            mutated_sequences['mutation_pos'].append(i)
+                            mutated_sequences['nuc'].append(nuc)
+                            mutated_sequences['var_nt_idx'].append(self.nuc_table[nuc])
+        elif self.type == 'indel': # mutate sequence by replacing ACGT with '-'
             if self.use_deletions is False:
                 raise ValueError("Indel mutation type requires use_deletions=True")
             for i in range(mutate_until_position):
@@ -51,6 +52,13 @@ class DependencyMapGenerator:
                     mutated_sequences['mutation_pos'].append(i)
                     mutated_sequences['nuc'].append('-')
                     mutated_sequences['var_nt_idx'].append(self.nuc_table['-'])
+        elif self.type == 'removal':  # remove nucleotide, pad '-' at end
+            for i in range(mutate_until_position):
+                mutated_sequences['seq'].append(seq[:i] + seq[i + 1:] + "-")
+                mutated_sequences['mutation_pos'].append(i)
+                mutated_sequences['nuc'].append('deletion')
+                mutated_sequences['var_nt_idx'].append(self.nuc_table['-'])
+            
         return pd.DataFrame(mutated_sequences)
 
     def _tok_func(self, x):
@@ -90,6 +98,20 @@ class DependencyMapGenerator:
         snp_reconstruct = torch.concat(output_arrays, axis=0)
         return snp_reconstruct.to(torch.float32).numpy()
 
+    @staticmethod
+    def reinsert_zero_row_probs(mut_probs_L: np.ndarray, i: int, epsilon=1e-10) -> np.ndarray:
+        L, V = mut_probs_L.shape
+        out = np.zeros((L + 1, V), dtype=mut_probs_L.dtype)
+
+        out[:i, :] = mut_probs_L[:i, :]
+        out[i+1:, :] = mut_probs_L[i:, :]  # shift down by 1 starting at i
+
+        out[i, :] = epsilon
+        out[i, :] = out[i, :] / out[i, :].sum()
+
+        out = out[:-1, :]  # drop last row (pad)
+        return out
+    
     def compute_map(self, seq, epsilon=1e-10):
         dataset = self._mutate_sequence(seq)
         data_loader = self._create_dataloader(dataset, batch_size=16)
@@ -101,7 +123,7 @@ class DependencyMapGenerator:
         if model_seq_len == input_len:
             pass
         elif model_seq_len == input_len + 2:
-            snp_reconstruct = snp_reconstruct[:, 1:-1, :]
+            snp_reconstruct = snp_reconstruct[:, 1:-1, :]  # Remove [CLS] and [SEP]
         else:
             diff = model_seq_len - input_len
             if diff > 0 and diff % 2 == 0:
@@ -121,10 +143,28 @@ class DependencyMapGenerator:
 
         reference_probs = snp_reconstruct[dataset[dataset['nuc'] == 'real sequence'].index[0]]
 
+        # reference row (real sequence)
+        ref_row = dataset.index[dataset['nuc'] == 'real sequence'][0]
+        reference_probs = snp_reconstruct[ref_row]
+
+        # --- aligned removal: realign every mutant row 1..N ---
+        if self.type == "removal":
+            for k, pos in enumerate(dataset.iloc[1:]['mutation_pos'].values, start=1):
+                snp_reconstruct[k] = self.reinsert_zero_row_probs(
+                    snp_reconstruct[k], int(pos), epsilon=epsilon
+                )
+
         snp_effect[dataset.iloc[1:]['mutation_pos'].values, :, dataset.iloc[1:]['var_nt_idx'].values, :] = \
             np.log2(snp_reconstruct[1:]) - np.log2(1 - snp_reconstruct[1:]) \
             - np.log2(reference_probs) + np.log2(1 - reference_probs)
 
+        if self.type == "removal":
+            # pick deletion at pos i=0 (row k=1 if your dataset ordering is simple)
+            i = int(dataset.iloc[1]['mutation_pos'])
+            before = self._model_inference(self._create_dataloader(dataset.iloc[[1]], batch_size=1))[0]  # optional
+            after  = snp_reconstruct[1]
+            print("aligned deletion pos:", i, "shape:", after.shape)
+               
         dep_map = np.max(np.abs(snp_effect), axis=(2, 3))
         np.fill_diagonal(dep_map, 0)
 
