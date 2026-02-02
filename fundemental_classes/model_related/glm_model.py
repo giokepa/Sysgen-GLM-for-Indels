@@ -54,12 +54,13 @@ class GLMModel:
                 print(f"Removed directory: {self.model_path}")
             except Exception as e:
                 print(f"Could not remove {self.model_path}: {e}")
-        if os.path.exists("temp_tokenizer.json"):
+        temp_file = "temp_tokenizer_with_deletions.json" if self.include_deletions else "temp_tokenizer_baseline.json"
+        if os.path.exists(temp_file):
             try:
-                os.remove("temp_tokenizer.json")
-                print(f"Removed temp_tokenizer.json")
+                os.remove(temp_file)
+                print(f"Removed {temp_file}")
             except Exception as e:
-                print(f"Could not remove temp_tokenizer.json: {e}")
+                print(f"Could not remove {temp_file}: {e}")
 
     def _try_load_existing_model(self, fasta_file, max_seq_length):
         try:
@@ -80,7 +81,7 @@ class GLMModel:
                 "config.json": os.path.join(self.model_path, "config.json"),
                 "model weights": os.path.join(self.model_path, "pytorch_model.bin"),
                 "tokenizer": os.path.join(self.model_path, "tokenizer.json"),
-                #"training_history": os.path.join(self.model_path, "training_history.json")
+                # "training_history": os.path.join(self.model_path, "training_history.json")
             }
             if not os.path.exists(required_files["model weights"]):
                 required_files["model weights"] = os.path.join(self.model_path, "model.safetensors")
@@ -422,12 +423,6 @@ class GLMModel:
 
     @staticmethod
     def create_tokenizer(include_deletions=True):
-        """
-        Create a tokenizer with or without deletion token.
-
-        Args:
-            include_deletions: If True, include '-' in vocabulary. If False, exclude it.
-        """
         if include_deletions:
             vocab = {
                 "[PAD]": 0,
@@ -441,8 +436,8 @@ class GLMModel:
                 "T": 8,
                 "-": 9
             }
+            temp_file = "temp_tokenizer_with_deletions.json"  # ← Unique name
         else:
-            # Baseline model without deletions
             vocab = {
                 "[PAD]": 0,
                 "[UNK]": 1,
@@ -454,13 +449,14 @@ class GLMModel:
                 "G": 7,
                 "T": 8
             }
+            temp_file = "temp_tokenizer_baseline.json"
 
         tokenizer = Tokenizer(models.WordLevel(vocab=vocab, unk_token="[UNK]"))
         tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern="", behavior="isolated")
-        tokenizer.save("temp_tokenizer.json")
+        tokenizer.save(temp_file)
 
         return PreTrainedTokenizerFast(
-            tokenizer_file="temp_tokenizer.json",
+            tokenizer_file=temp_file,
             unk_token="[UNK]", sep_token="[SEP]", pad_token="[PAD]",
             cls_token="[CLS]", mask_token="[MASK]"
         )
