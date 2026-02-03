@@ -17,14 +17,13 @@ def plot(header, sequence, prob_matrix, motif_length=10, with_deletions=True):
 
     logo = logomaker.Logo(ic_df, ax=ax, color_scheme=dna_colors, vpad=0.0, width=1.0)
     logo.style_spines(spines=['top', 'right', 'left'], visible=False)
-    logo.style_glyphs_in_sequence(sequence=sequence, color='darkorange')
     ax.spines['left'].set_visible(True)
     ax.set_ylabel("Reconstruction\n(scaled by IC)", fontsize=9)
 
     y_max = ax.get_ylim()[1]
     for i, nucleotide in enumerate(sequence):
         color = dna_colors.get(nucleotide, 'black')
-        ax.text(i + 0.5, y_max * 1.05, nucleotide,
+        ax.text(i, y_max * 1.05, nucleotide,
                 ha='center', va='bottom',
                 fontsize=10, fontweight='bold',
                 color=color, family='monospace')
