@@ -11,17 +11,16 @@ import torch
 import torch.nn.functional as F
 from glm_model import GLMModel
 
-MODEL_DIR = "/Users/amelielaura/Documents/dna_bert_final_new"
+MODEL_DIR = "./dna_bert_final_indel"
 
 TRAIN_FASTA_FOR_MODEL = (
-    "/Users/amelielaura/Documents/Project6/data/"
-    "augumented_sequence_size10000_length150_deletions0.2_nodeletionseq0.1.fasta"
+    "./simulated_sequences_distance=5/new_augmented_sequence_size5000_length100_deletions0.2_nodeletionseq0.05.fasta"
 )
 
-EVAL_REF_FASTA = "/Users/amelielaura/Documents/Project6/data/sequence_size10000_length150_deletions0_nodeletionseq1_seed538.fasta"
-EVAL_ALT_FASTA = "/Users/amelielaura/Documents/Project6/data/augmented_fixedlen_DUPBOTH_deletions0.2_seed538.fasta"
+EVAL_REF_FASTA = "./evaluation/sequence_size10000_length150_deletions0_nodeletionseq1_seed538.fasta"
+EVAL_ALT_FASTA = "./evaluation/augmented_fixedlen_DUPBOTH_deletions0.2_seed538.fasta"
 
-OUT_DIR = "/Users/amelielaura/Documents/Project6/outputs/eval_only_motif_based/evaluation_232_paired"
+OUT_DIR = "./evaluation"
 
 GLOBAL_SEED = 727
 
