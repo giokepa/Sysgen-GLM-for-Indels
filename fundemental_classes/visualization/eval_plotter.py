@@ -16,8 +16,11 @@ class EvaluationVisualizer:
     def plot_boxplots(self, save_path: str = None):
         fig, axes = plt.subplots(2, 2, figsize=(14, 12))
 
-        baseline_motif_ce = self.evaluator.results['baseline']['motif_cross_entropies']
-        deletion_motif_ce = self.evaluator.results['deletion']['motif_cross_entropies']
+        baseline_motif_ce = np.array(self.evaluator.results['baseline']['motif_cross_entropies'])
+        deletion_motif_ce = np.array(self.evaluator.results['deletion']['motif_cross_entropies'])
+
+        baseline_motif_ce = baseline_motif_ce[np.isfinite(baseline_motif_ce)]
+        deletion_motif_ce = deletion_motif_ce[np.isfinite(deletion_motif_ce)]
 
         ax1 = axes[0, 0]
         data_motif_ce = [baseline_motif_ce, deletion_motif_ce]
@@ -33,8 +36,11 @@ class EvaluationVisualizer:
         ax1.plot([1, 2], means_motif_ce, 'D', color='red', markersize=8, label='Mean', zorder=3)
         ax1.legend()
 
-        baseline_perp = self.evaluator.results['baseline']['perplexities']
-        deletion_perp = self.evaluator.results['deletion']['perplexities']
+        baseline_perp = np.array(self.evaluator.results['baseline']['perplexities'])
+        deletion_perp = np.array(self.evaluator.results['deletion']['perplexities'])
+
+        baseline_perp = baseline_perp[np.isfinite(baseline_perp)]
+        deletion_perp = deletion_perp[np.isfinite(deletion_perp)]
 
         ax2 = axes[0, 1]
         data_perp = [baseline_perp, deletion_perp]
@@ -50,8 +56,11 @@ class EvaluationVisualizer:
         ax2.plot([1, 2], means_perp, 'D', color='red', markersize=8, label='Mean', zorder=3)
         ax2.legend()
 
-        baseline_4nt_ce = self.evaluator.results['baseline_4nt']['cross_entropies']
-        deletion_4nt_ce = self.evaluator.results['deletion_4nt']['cross_entropies']
+        baseline_4nt_ce = np.array(self.evaluator.results['baseline_4nt']['cross_entropies'])
+        deletion_4nt_ce = np.array(self.evaluator.results['deletion_4nt']['cross_entropies'])
+
+        baseline_4nt_ce = baseline_4nt_ce[np.isfinite(baseline_4nt_ce)]
+        deletion_4nt_ce = deletion_4nt_ce[np.isfinite(deletion_4nt_ce)]
 
         ax3 = axes[1, 0]
         data_4nt_ce = [baseline_4nt_ce, deletion_4nt_ce]
@@ -67,8 +76,11 @@ class EvaluationVisualizer:
         ax3.plot([1, 2], means_4nt_ce, 'D', color='red', markersize=8, label='Mean', zorder=3)
         ax3.legend()
 
-        baseline_4nt_perp = self.evaluator.results['baseline_4nt']['perplexities']
-        deletion_4nt_perp = self.evaluator.results['deletion_4nt']['perplexities']
+        baseline_4nt_perp = np.array(self.evaluator.results['baseline_4nt']['perplexities'])
+        deletion_4nt_perp = np.array(self.evaluator.results['deletion_4nt']['perplexities'])
+
+        baseline_4nt_perp = baseline_4nt_perp[np.isfinite(baseline_4nt_perp)]
+        deletion_4nt_perp = deletion_4nt_perp[np.isfinite(deletion_4nt_perp)]
 
         ax4 = axes[1, 1]
         data_4nt_perp = [baseline_4nt_perp, deletion_4nt_perp]
@@ -95,6 +107,13 @@ class EvaluationVisualizer:
 
         baseline_ce = np.array(self.evaluator.results['baseline']['motif_cross_entropies'])
         deletion_ce = np.array(self.evaluator.results['deletion']['motif_cross_entropies'])
+
+        baseline_ce = baseline_ce[np.isfinite(baseline_ce)]
+        deletion_ce = deletion_ce[np.isfinite(deletion_ce)]
+
+        if len(baseline_ce) == 0 or len(deletion_ce) == 0:
+            print("Warning: No finite cross-entropy values found!")
+            return
 
         ax1 = axes[0, 0]
         ax1.hist(baseline_ce, bins=30, alpha=0.6, label='Baseline', color='blue', edgecolor='black')
@@ -123,15 +142,22 @@ class EvaluationVisualizer:
         ax3 = axes[1, 0]
         df = self.evaluator.get_results_dataframe()
         df_motif = df[df['comparison_type'] == 'motif_only']
-        sns.violinplot(data=df_motif, x='model', y='cross_entropy', ax=ax3,
-                       palette=['lightblue', 'lightcoral'])
-        ax3.set_xlabel('Model', fontsize=11)
-        ax3.set_ylabel('Cross-Entropy (Motif-Only)', fontsize=11)
-        ax3.set_title('Cross-Entropy Distribution (Violin)', fontsize=12, fontweight='bold')
-        ax3.set_xticklabels(['Baseline', 'With Deletions'])
+        df_motif = df_motif[np.isfinite(df_motif['cross_entropy'])]
+
+        if len(df_motif) > 0:
+            sns.violinplot(data=df_motif, x='model', y='cross_entropy', ax=ax3,
+                           palette=['lightblue', 'lightcoral'])
+            ax3.set_xlabel('Model', fontsize=11)
+            ax3.set_ylabel('Cross-Entropy (Motif-Only)', fontsize=11)
+            ax3.set_title('Cross-Entropy Distribution (Violin)', fontsize=12, fontweight='bold')
+            ax3.set_xticklabels(['Baseline', 'With Deletions'])
 
         ax4 = axes[1, 1]
-        sp_stats.probplot(baseline_ce - deletion_ce, dist="norm", plot=ax4)
+        min_len = min(len(baseline_ce), len(deletion_ce))
+        if min_len > 0:
+            baseline_ce_sorted = np.sort(baseline_ce)[:min_len]
+            deletion_ce_sorted = np.sort(deletion_ce)[:min_len]
+            sp_stats.probplot(baseline_ce_sorted - deletion_ce_sorted, dist="norm", plot=ax4)
         ax4.set_title('Q-Q Plot (Baseline - Deletion Differences)', fontsize=12, fontweight='bold')
         ax4.grid(True, alpha=0.3)
 
@@ -147,7 +173,11 @@ class EvaluationVisualizer:
         baseline_motif_ce = np.array(self.evaluator.results['baseline']['motif_cross_entropies'])
         deletion_motif_ce = np.array(self.evaluator.results['deletion']['motif_cross_entropies'])
 
-        if len(baseline_motif_ce) == len(deletion_motif_ce):
+        finite_mask = np.isfinite(baseline_motif_ce) & np.isfinite(deletion_motif_ce)
+        baseline_motif_ce = baseline_motif_ce[finite_mask]
+        deletion_motif_ce = deletion_motif_ce[finite_mask]
+
+        if len(baseline_motif_ce) > 0 and len(deletion_motif_ce) > 0:
             ax1 = axes[0]
             ax1.scatter(baseline_motif_ce, deletion_motif_ce, alpha=0.5, s=50,
                         edgecolors='black', linewidth=0.5)
@@ -174,7 +204,11 @@ class EvaluationVisualizer:
         baseline_4nt_ce = np.array(self.evaluator.results['baseline_4nt']['cross_entropies'])
         deletion_4nt_ce = np.array(self.evaluator.results['deletion_4nt']['cross_entropies'])
 
-        if len(baseline_4nt_ce) == len(deletion_4nt_ce):
+        finite_mask_4nt = np.isfinite(baseline_4nt_ce) & np.isfinite(deletion_4nt_ce)
+        baseline_4nt_ce = baseline_4nt_ce[finite_mask_4nt]
+        deletion_4nt_ce = deletion_4nt_ce[finite_mask_4nt]
+
+        if len(baseline_4nt_ce) > 0 and len(deletion_4nt_ce) > 0:
             ax2 = axes[1]
             ax2.scatter(baseline_4nt_ce, deletion_4nt_ce, alpha=0.5, s=50,
                         edgecolors='black', linewidth=0.5, color='green')
@@ -210,6 +244,9 @@ class EvaluationVisualizer:
 
         baseline_motif_ce = np.array(self.evaluator.results['baseline']['motif_cross_entropies'])
         deletion_motif_ce = np.array(self.evaluator.results['deletion']['motif_cross_entropies'])
+
+        baseline_motif_ce = baseline_motif_ce[np.isfinite(baseline_motif_ce)]
+        deletion_motif_ce = deletion_motif_ce[np.isfinite(deletion_motif_ce)]
 
         ax1 = fig.add_subplot(gs[0, :2])
         data_motif = [baseline_motif_ce, deletion_motif_ce]
@@ -261,6 +298,9 @@ class EvaluationVisualizer:
         baseline_4nt_ce = np.array(self.evaluator.results['baseline_4nt']['cross_entropies'])
         deletion_4nt_ce = np.array(self.evaluator.results['deletion_4nt']['cross_entropies'])
 
+        baseline_4nt_ce = baseline_4nt_ce[np.isfinite(baseline_4nt_ce)]
+        deletion_4nt_ce = deletion_4nt_ce[np.isfinite(deletion_4nt_ce)]
+
         ax4 = fig.add_subplot(gs[2, :2])
         data_4nt = [baseline_4nt_ce, deletion_4nt_ce]
         bp2 = ax4.boxplot(data_4nt, labels=['Baseline', 'With Deletions'],
@@ -292,15 +332,19 @@ class EvaluationVisualizer:
             table2[(0, i)].set_facecolor('#FF9800')
             table2[(0, i)].set_text_props(weight='bold', color='white')
         ax5.set_title('4-Nucleotide Tests (α=0.05)', fontsize=10, fontweight='bold', pad=20)
+
         ax6 = fig.add_subplot(gs[3, 0])
         df = self.evaluator.get_results_dataframe()
         df_motif = df[df['comparison_type'] == 'motif_only']
-        sns.violinplot(data=df_motif, x='model', y='cross_entropy', ax=ax6,
-                       palette=['lightblue', 'lightcoral'])
-        ax6.set_xlabel('')
-        ax6.set_ylabel('CE (Motif)', fontsize=10)
-        ax6.set_title('Distribution Shape', fontsize=11, fontweight='bold')
-        ax6.set_xticklabels(['Baseline', 'Deletion'])
+        df_motif = df_motif[np.isfinite(df_motif['cross_entropy'])]
+
+        if len(df_motif) > 0:
+            sns.violinplot(data=df_motif, x='model', y='cross_entropy', ax=ax6,
+                           palette=['lightblue', 'lightcoral'])
+            ax6.set_xlabel('')
+            ax6.set_ylabel('CE (Motif)', fontsize=10)
+            ax6.set_title('Distribution Shape', fontsize=11, fontweight='bold')
+            ax6.set_xticklabels(['Baseline', 'Deletion'])
 
         ax7 = fig.add_subplot(gs[3, 1])
         sorted_baseline_motif = np.sort(baseline_motif_ce)
