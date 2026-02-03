@@ -9,7 +9,7 @@ from typing import List, Tuple, Dict, Any, Optional, Set
 import numpy as np
 import torch
 import torch.nn.functional as F
-from glm_model import GLMModel
+from fundemental_classes.glm_model import GLMModel
 
 MODEL_DIR = "./dna_bert_final_indel"
 
