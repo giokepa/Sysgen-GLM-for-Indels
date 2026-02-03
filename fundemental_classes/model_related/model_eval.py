@@ -305,6 +305,57 @@ class ModelEvaluator:
             json.dump(output_data, f, indent=2)
         print(f"\nResults exported to: {output_path}")
 
+    @classmethod
+    def load_results(cls, json_path: str, baseline_model: GLMModel = None, deletion_model: GLMModel = None):
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+
+        evaluator = cls(baseline_model, deletion_model)
+
+        if 'motif_cross_entropies' in data['baseline']:
+            evaluator.results['baseline']['motif_cross_entropies'] = data['baseline']['motif_cross_entropies']
+        elif 'cross_entropies' in data['baseline']:
+            evaluator.results['baseline']['motif_cross_entropies'] = data['baseline']['cross_entropies']
+
+        evaluator.results['baseline']['perplexities'] = data['baseline']['perplexities']
+        evaluator.results['baseline']['sequence_ids'] = data['baseline']['sequence_ids']
+        evaluator.results['baseline']['cross_entropies'] = evaluator.results['baseline']['motif_cross_entropies']
+
+        if 'motif_cross_entropies' in data['deletion']:
+            evaluator.results['deletion']['motif_cross_entropies'] = data['deletion']['motif_cross_entropies']
+        elif 'cross_entropies' in data['deletion']:
+            evaluator.results['deletion']['motif_cross_entropies'] = data['deletion']['cross_entropies']
+
+        evaluator.results['deletion']['perplexities'] = data['deletion']['perplexities']
+        evaluator.results['deletion']['sequence_ids'] = data['deletion']['sequence_ids']
+        evaluator.results['deletion']['cross_entropies'] = evaluator.results['deletion']['motif_cross_entropies']
+
+        if 'baseline_4nt' in data:
+            evaluator.results['baseline_4nt']['cross_entropies'] = data['baseline_4nt']['cross_entropies']
+            evaluator.results['baseline_4nt']['sequence_ids'] = data['baseline_4nt']['sequence_ids']
+            evaluator.results['baseline_4nt']['perplexities'] = [np.exp(ce) if ce != float('inf') else float('inf')
+                                                                 for ce in data['baseline_4nt']['cross_entropies']]
+        else:
+            print("Warning: No 4-nucleotide comparison data found in JSON. Will use motif data.")
+            evaluator.results['baseline_4nt']['cross_entropies'] = evaluator.results['baseline'][
+                'motif_cross_entropies']
+            evaluator.results['baseline_4nt']['sequence_ids'] = evaluator.results['baseline']['sequence_ids']
+            evaluator.results['baseline_4nt']['perplexities'] = evaluator.results['baseline']['perplexities']
+
+        if 'deletion_4nt' in data:
+            evaluator.results['deletion_4nt']['cross_entropies'] = data['deletion_4nt']['cross_entropies']
+            evaluator.results['deletion_4nt']['sequence_ids'] = data['deletion_4nt']['sequence_ids']
+            evaluator.results['deletion_4nt']['perplexities'] = [np.exp(ce) if ce != float('inf') else float('inf')
+                                                                 for ce in data['deletion_4nt']['cross_entropies']]
+        else:
+            evaluator.results['deletion_4nt']['cross_entropies'] = evaluator.results['deletion'][
+                'motif_cross_entropies']
+            evaluator.results['deletion_4nt']['sequence_ids'] = evaluator.results['deletion']['sequence_ids']
+            evaluator.results['deletion_4nt']['perplexities'] = evaluator.results['deletion']['perplexities']
+
+        print(f"✓ Results loaded from {json_path}")
+        return evaluator
+
     def get_results_dataframe(self) -> pd.DataFrame:
         baseline_motif_df = pd.DataFrame({
             'sequence_id': self.results['baseline']['sequence_ids'],
