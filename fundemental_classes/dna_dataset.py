@@ -63,11 +63,15 @@ class DNADataset(torch.utils.data.Dataset):
                     return header, current_seq
         raise IndexError("Index out of range")
     @staticmethod
-    def parse_header(header_str):
-        pos_a = re.search(r"posAmotif=(\d+|None)", header_str)
-        pos_b = re.search(r"posBmotif=(\d+|None)", header_str)
+    def parse_motif_positions(header):
+        motif_positions = {}
+        parts = header.split('|')
+        for part in parts:
+            if 'posAmotif=' in part:
+                pos_str = part.split('=')[1]
+                motif_positions['A'] = [int(x) for x in pos_str.split(',')]
+            elif 'posBmotif=' in part:
+                pos_str = part.split('=')[1]
+                motif_positions['B'] = [int(x) for x in pos_str.split(',')]
 
-        start_a = int(pos_a.group(1)) if pos_a and pos_a.group(1) != 'None' else None
-        start_b = int(pos_b.group(1)) if pos_b and pos_b.group(1) != 'None' else None
-
-        return start_a, start_b
+        return motif_positions
