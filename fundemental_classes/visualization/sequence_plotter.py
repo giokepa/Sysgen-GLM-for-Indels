@@ -54,6 +54,6 @@ def plot(header, sequence, prob_matrix, motif_length=10, with_deletions=True):
             draw_motif_box(pos, "Motif B")
 
     clean_title = header.split('|')[0].replace(">", "")
-    plt.title(f"Sequence: {clean_title}", fontsize=10)
+    #plt.title(f"Sequence: {clean_title}", fontsize=10)
     plt.tight_layout()
     plt.show()

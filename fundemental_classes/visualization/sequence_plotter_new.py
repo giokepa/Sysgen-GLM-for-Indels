@@ -96,6 +96,6 @@ def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05
             y_cursor -= h
 
     clean_title = header.split('|')[0].replace(">", "")
-    plt.title(f"Sequence: {clean_title}", fontsize=10)
+    #plt.title(f"Sequence: {clean_title}", fontsize=10)
     plt.tight_layout()
     plt.show()
