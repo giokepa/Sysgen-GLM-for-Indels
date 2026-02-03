@@ -53,11 +53,19 @@ class DependencyMapGenerator:
                     mutated_sequences['nuc'].append('-')
                     mutated_sequences['var_nt_idx'].append(self.nuc_table['-'])
         elif self.type == 'removal':  # remove nucleotide, pad '-' at end
-            for i in range(mutate_until_position):
-                mutated_sequences['seq'].append(seq[:i] + seq[i + 1:] + "-")
-                mutated_sequences['mutation_pos'].append(i)
-                mutated_sequences['nuc'].append('deletion')
-                mutated_sequences['var_nt_idx'].append(self.nuc_table['-'])
+            if self.use_deletions == True:
+                for i in range(mutate_until_position):
+                    mutated_sequences['seq'].append(seq[:i] + seq[i + 1:] + "-")
+                    mutated_sequences['mutation_pos'].append(i)
+                    mutated_sequences['nuc'].append('deletion')
+                    mutated_sequences['var_nt_idx'].append(self.nuc_table['-'])
+            else:
+                for i in range(mutate_until_position):
+                    mutated_sequences['seq'].append(seq[:i] + seq[i + 1:] + "A")
+                    mutated_sequences['mutation_pos'].append(i)
+                    mutated_sequences['nuc'].append('deletion')
+                    mutated_sequences['var_nt_idx'].append(self.nuc_table['A'])
+
             
         return pd.DataFrame(mutated_sequences)
 
