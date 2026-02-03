@@ -24,7 +24,7 @@ def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05
     y_max = ax.get_ylim()[1]
     for i, nucleotide in enumerate(sequence):
         color = dna_colors.get(nucleotide, 'black')
-        ax.text(i + 0.5, y_max * 1.05, nucleotide,
+        ax.text(i, y_max * 1.05, nucleotide,
                 ha='center', va='bottom',
                 fontsize=10, fontweight='bold',
                 color=color, family='monospace')
