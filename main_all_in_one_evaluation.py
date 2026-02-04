@@ -9,12 +9,12 @@ from typing import List, Tuple, Dict, Any, Optional, Set
 import numpy as np
 import torch
 import torch.nn.functional as F
-from glm_model import GLMModel
+from fundemental_classes.model_related.glm_model import GLMModel
 
 MODEL_DIR = "./dna_bert_final_indel"
 
 TRAIN_FASTA_FOR_MODEL = (
-    "./simulated_sequences_distance=5/new_augmented_sequence_size5000_length100_deletions0.2_nodeletionseq0.05.fasta"
+    "simulated_sequences_distance=5/new_augumented_sequence_size5000_length100_deletions0.2_nodeletionseq0.05.fasta"
 )
 
 EVAL_REF_FASTA = "./evaluation/sequence_size10000_length150_deletions0_nodeletionseq1_seed538.fasta"

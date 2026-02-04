@@ -80,13 +80,13 @@ def plot(header, sequence, prob_matrix, motif_length=10, small_ic_threshold=0.05
                 v,
                 small_ic_threshold,
                 min_len=0.01,
-                max_len=0.8,
-                gamma=4.0
+                max_len=0.6,
+                gamma=2.0
             )
 
             rect = patches.Rectangle(
                 (pos - 0.5, y_cursor - h),
-                0.7,
+                0.6,
                 h,
                 linewidth=0,
                 facecolor=dna_colors[letter],
