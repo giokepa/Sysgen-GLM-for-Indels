@@ -50,6 +50,29 @@ TRANS_COLOR: Dict[str, str] = {
     "B->B": "#ff7f00",
 }
 
+# Total motif count groups (A_count + B_count)
+MOTIFCOUNT_ORDER = ["0", "1", "2", "3", "4", "5plus"]
+MOTIFCOUNT_PRETTY: Dict[str, str] = {
+    "0": "0 motifs total",
+    "1": "1 motif total",
+    "2": "2 motifs total",
+    "3": "3 motifs total",
+    "4": "4 motifs total",
+    "5plus": "≥5 motifs total",
+}
+MOTIFCOUNT_COLOR: Dict[str, str] = {
+    "0": "#999999",
+    "1": "#377eb8",
+    "2": "#ff7f00",
+    "3": "#4daf4a",
+    "4": "#984ea3",
+    "5plus": "#e41a1c",
+}
+
+
+# -------------------------------------------------------------------
+# Plot style
+# -------------------------------------------------------------------
 def set_friendly_style() -> None:
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.rcParams.update(
@@ -72,6 +95,10 @@ def set_friendly_style() -> None:
 
 set_friendly_style()
 
+
+# -------------------------------------------------------------------
+# FASTA parsing
+# -------------------------------------------------------------------
 def parse_pos_list(value: Optional[str]) -> List[int]:
     if value in (None, "None", ""):
         return []
@@ -84,11 +111,6 @@ def parse_pos_list(value: Optional[str]) -> List[int]:
 
 
 def to_int_or_none(value: Optional[str]) -> Optional[int]:
-    """
-    Convert a header field to int or None.
-
-    If the field contains a comma, use only the first part.
-    """
     if value in (None, "None", ""):
         return None
     first_part = str(value).split(",", 1)[0]
@@ -96,23 +118,15 @@ def to_int_or_none(value: Optional[str]) -> Optional[int]:
 
 
 def parse_header(header_line: str) -> Dict[str, Any]:
-    """
-    Parse a FASTA header into a metadata dict.
-
-    Expected format:
-        >id|key1=val1|key2=val2|...
-    """
     stripped = header_line.lstrip(">")
     raw_fields = stripped.split("|")
     record: Dict[str, Any] = {"id": raw_fields[0]}
 
-    # Parse key=value fields
     for field in raw_fields[1:]:
         if "=" in field:
             key, value = field.split("=", 1)
             record[key] = value
 
-    # Derived parsed fields
     record["posA_list"] = parse_pos_list(record.get("posAmotif"))
     record["posB_list"] = parse_pos_list(record.get("posBmotif"))
     record["gaplength"] = to_int_or_none(record.get("gaplength"))
@@ -121,14 +135,6 @@ def parse_header(header_line: str) -> Dict[str, Any]:
 
 
 def read_fasta_with_metadata(path: Path) -> pd.DataFrame:
-    """
-    Read a FASTA file where each header encodes metadata.
-
-    Returns a DataFrame with one row per sequence and columns:
-    - id, seq
-    - posA_list, posB_list, gaplength, deletions_header
-    plus any other header key=value pairs.
-    """
     records: List[Dict[str, Any]] = []
     current_header: Optional[str] = None
     current_sequence_lines: List[str] = []
@@ -140,18 +146,15 @@ def read_fasta_with_metadata(path: Path) -> pd.DataFrame:
                 continue
 
             if line.startswith(">"):
-                # Finish previous record
                 if current_header is not None:
                     record = parse_header(current_header)
                     record["seq"] = "".join(current_sequence_lines)
                     records.append(record)
-                # Start new record
                 current_header = line
                 current_sequence_lines = []
             else:
                 current_sequence_lines.append(line)
 
-        # Add last record
         if current_header is not None:
             record = parse_header(current_header)
             record["seq"] = "".join(current_sequence_lines)
@@ -161,7 +164,7 @@ def read_fasta_with_metadata(path: Path) -> pd.DataFrame:
 
 
 # -------------------------------------------------------------------
-# Classification and helper functions
+# Classification and helpers
 # -------------------------------------------------------------------
 def classify_sequence(a_count: int, b_count: int) -> str:
     if a_count == 0 and b_count == 0:
@@ -173,6 +176,23 @@ def classify_sequence(a_count: int, b_count: int) -> str:
     if a_count == 1 and b_count == 1:
         return "both_exact_once"
     return "multimotifs"
+
+
+def total_motif_group(total_count: int) -> str:
+    """
+    Map total motif count (A + B) to the groups 0,1,2,3,4,≥5.
+    """
+    if total_count == 0:
+        return "0"
+    if total_count == 1:
+        return "1"
+    if total_count == 2:
+        return "2"
+    if total_count == 3:
+        return "3"
+    if total_count == 4:
+        return "4"
+    return "5plus"
 
 
 def count_deletions_between(
@@ -187,7 +207,6 @@ def count_deletions_between(
 
 
 def event_sort_key(entry: Tuple[int, str, int]) -> int:
-    """Sort key for motif events: sort by genomic position."""
     return entry[0]
 
 
@@ -211,19 +230,18 @@ def flatten_lists(series_of_lists: pd.Series) -> np.ndarray:
 
 
 # -------------------------------------------------------------------
-# Main analysis and plotting
+# Main
 # -------------------------------------------------------------------
 def main() -> None:
-    # Ensure paths exist
     if not FASTA.exists():
         raise FileNotFoundError(f"FASTA file not found at: {FASTA}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ================================================================
-    # 1. Load data and derive basic columns
-    # ================================================================
+    # ---------------------------------------------------------------
+    # Load data and basic columns
+    # ---------------------------------------------------------------
     df = read_fasta_with_metadata(FASTA)
     if df.empty:
         raise ValueError("No sequences found in FASTA.")
@@ -232,21 +250,20 @@ def main() -> None:
     df["sequence_length"] = df["seq"].str.len()
     df["total_deletions"] = df["seq"].str.count("-").astype(int)
 
-    # Counts of motif A and B per sequence
-    a_counts: List[int] = []
-    b_counts: List[int] = []
-    for row in df.itertuples(index=False):
-        a_counts.append(len(row.posA_list))
-        b_counts.append(len(row.posB_list))
-    df["A_count"] = a_counts
-    df["B_count"] = b_counts
+    # counts of motif A and B per sequence
+    df["A_count"] = df["posA_list"].apply(len)
+    df["B_count"] = df["posB_list"].apply(len)
 
-    # 5-class labels per sequence
+    # total motifs (A+B) and motif-count groups
+    df["total_motifs"] = df["A_count"] + df["B_count"]
+    df["motif_group"] = df["total_motifs"].apply(total_motif_group)
+
+    # 5‑class labels
     df["class5"] = [
         classify_sequence(int(a), int(b)) for a, b in zip(df["A_count"], df["B_count"])
     ]
 
-    # Class counts and percentages
+    # class counts
     class_counts = (
         df["class5"]
         .value_counts()
@@ -257,24 +274,21 @@ def main() -> None:
     class_counts["percent"] = (class_counts["count"] / len(df) * 100).round(2)
     class_counts.to_csv(OUT_DIR / "class5_counts.csv", index=False)
 
-    # ================================================================
-    # 2. both_exact_once: deletions between the two motifs
-    #    Used later for plot (4)
-    # ================================================================
+    # ---------------------------------------------------------------
+    # both_exact_once: deletions between motifs
+    # ---------------------------------------------------------------
     both_exact_once_df = df[df["class5"] == "both_exact_once"].copy()
     both_between = np.array([], dtype=int)
 
     if not both_exact_once_df.empty:
         deletions_between_list: List[int] = []
         for row in both_exact_once_df.itertuples(index=False):
-            # Require at least one A and one B
             if not row.posA_list or not row.posB_list:
                 continue
 
             first_a = int(row.posA_list[0])
             first_b = int(row.posB_list[0])
 
-            # Determine which motif comes first in the sequence
             if first_a <= first_b:
                 start_pos = first_a
                 end_pos = first_b
@@ -293,10 +307,9 @@ def main() -> None:
         if deletions_between_list:
             both_between = np.array(deletions_between_list, dtype=int)
 
-    # ================================================================
-    # 3. multimotifs: motif transitions and deletions between them
-    #    Used later for plots (5) and (6)
-    # ================================================================
+    # ---------------------------------------------------------------
+    # multimotifs: motif transitions and deletions between them
+    # ---------------------------------------------------------------
     multimotifs_df = df[df["class5"] == "multimotifs"].copy()
     transition_rows: List[Dict[str, Any]] = []
 
@@ -306,7 +319,6 @@ def main() -> None:
             sequence_string = row.seq
             seq_id = row.id
 
-            # Consecutive motif pairs along the sequence
             for idx in range(len(events) - 1):
                 position_1, type_1, length_1 = events[idx]
                 position_2, type_2, _ = events[idx + 1]
@@ -328,14 +340,17 @@ def main() -> None:
     transitions_df = pd.DataFrame(transition_rows)
     transitions_df.to_csv(OUT_DIR / "multimotif_transitions.csv", index=False)
 
+    # ---------------------------------------------------------------
+    # Histograms and transition stats
+    # ---------------------------------------------------------------
     max_total_deletions = int(df["total_deletions"].max())
     main_length = int(df["sequence_length"].mode().iloc[0])
     bin_edges = np.arange(0, main_length + 1, 5)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
+    # motif positions by class5 (for plots using class5)
     histA_by_class: Dict[str, np.ndarray] = {}
     histB_by_class: Dict[str, np.ndarray] = {}
-
     for class_name in CLASS_ORDER:
         a_positions_all = flatten_lists(
             df.loc[df["class5"] == class_name, "posA_list"]
@@ -358,9 +373,29 @@ def main() -> None:
         else:
             histB_by_class[class_name] = np.zeros(len(bin_centers), dtype=int)
 
+    # motif positions by total motif group (for plot 2)
+    histA_by_group: Dict[str, np.ndarray] = {}
+    histB_by_group: Dict[str, np.ndarray] = {}
+    for group in MOTIFCOUNT_ORDER:
+        a_positions_all = flatten_lists(
+            df.loc[df["motif_group"] == group, "posA_list"]
+        )
+        b_positions_all = flatten_lists(
+            df.loc[df["motif_group"] == group, "posB_list"]
+        )
+
+        if a_positions_all.size > 0:
+            histA_by_group[group] = np.histogram(a_positions_all, bins=bin_edges)[0]
+        else:
+            histA_by_group[group] = np.zeros(len(bin_centers), dtype=int)
+
+        if b_positions_all.size > 0:
+            histB_by_group[group] = np.histogram(b_positions_all, bins=bin_edges)[0]
+        else:
+            histB_by_group[group] = np.zeros(len(bin_centers), dtype=int)
+
     transition_counts: Dict[str, int] = {}
     transition_values: Dict[str, np.ndarray] = {}
-
     for t in TRANS_ORDER:
         transition_counts[t] = 0
         transition_values[t] = np.array([], dtype=int)
@@ -374,12 +409,15 @@ def main() -> None:
             if subset.shape[0] > 0:
                 transition_values[t] = subset.astype(int).to_numpy()
 
+    # ---------------------------------------------------------------
+    # Case 1: no deletions → only motif-based plots
+    # ---------------------------------------------------------------
     if max_total_deletions == 0:
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         ax_classes = axes[0]
         ax_positions = axes[1]
 
-        # Plot 1: class counts
+        # Plot 1: class counts (class5)
         pretty_labels: List[str] = []
         count_values: List[int] = []
         color_values: List[str] = []
@@ -404,23 +442,31 @@ def main() -> None:
         ax_classes.set_ylabel("Number of sequences")
         ax_classes.tick_params(axis="x", rotation=15)
 
-        for class_name in CLASS_ORDER:
-            hist_a = histA_by_class[class_name]
-            hist_b = histB_by_class[class_name]
+        # Plot 2: motif positions by total motif count group
+        for group in MOTIFCOUNT_ORDER:
+            hist_a = histA_by_group[group]
+            hist_b = histB_by_group[group]
 
             if hist_a.sum() > 0:
                 ax_positions.plot(
-                    bin_centers, hist_a, label=f"A | {CLASS_PRETTY[class_name]}"
+                    bin_centers,
+                    hist_a,
+                    color=MOTIFCOUNT_COLOR[group],
+                    label=f"A | {MOTIFCOUNT_PRETTY[group]}",
                 )
             if hist_b.sum() > 0:
                 ax_positions.plot(
                     bin_centers,
                     hist_b,
+                    color=MOTIFCOUNT_COLOR[group],
                     linestyle="--",
-                    label=f"B | {CLASS_PRETTY[class_name]}",
+                    label=f"B | {MOTIFCOUNT_PRETTY[group]}",
                 )
 
-        ax_positions.set_title("Motif start positions (A solid, B dashed)")
+        ax_positions.set_title(
+            "Motif start positions by total motif count\n"
+            "(A solid, B dashed; groups 0,1,2,3,4,≥5)"
+        )
         ax_positions.set_xlabel("Start position (0-based, binned by 5)")
         ax_positions.set_ylabel("Count")
         ax_positions.set_xlim(0, main_length)
@@ -433,10 +479,14 @@ def main() -> None:
         fig.savefig(out_png, dpi=220, bbox_inches="tight")
         plt.show()
         return
+
+    # ---------------------------------------------------------------
+    # Case 2: deletions present → 6 plots
+    # ---------------------------------------------------------------
     fig, axes_array = plt.subplots(3, 2, figsize=(16, 12))
     axes_array = axes_array.reshape(3, 2)
 
-
+    # (1) class counts by class5
     ax_classes = axes_array[0, 0]
     pretty_labels = []
     count_values = []
@@ -462,40 +512,47 @@ def main() -> None:
     ax_classes.set_ylabel("Number of sequences")
     ax_classes.tick_params(axis="x", rotation=15)
 
+    # (2) motif positions by total motif count group
     ax_positions = axes_array[0, 1]
-
-    for class_name in CLASS_ORDER:
-        hist_a = histA_by_class[class_name]
-        hist_b = histB_by_class[class_name]
+    for group in MOTIFCOUNT_ORDER:
+        hist_a = histA_by_group[group]
+        hist_b = histB_by_group[group]
 
         if hist_a.sum() > 0:
             ax_positions.plot(
-                bin_centers, hist_a, label=f"A | {CLASS_PRETTY[class_name]}"
+                bin_centers,
+                hist_a,
+                color=MOTIFCOUNT_COLOR[group],
+                label=f"A | {MOTIFCOUNT_PRETTY[group]}",
             )
         if hist_b.sum() > 0:
             ax_positions.plot(
                 bin_centers,
                 hist_b,
+                color=MOTIFCOUNT_COLOR[group],
                 linestyle="--",
-                label=f"B | {CLASS_PRETTY[class_name]}",
+                label=f"B | {MOTIFCOUNT_PRETTY[group]}",
             )
 
-    ax_positions.set_title("2) Motif start positions (A solid, B dashed)")
+    ax_positions.set_title(
+        "2) Motif start positions by total motifs\n"
+        "(A solid, B dashed; groups 0,1,2,3,4,≥5)"
+    )
     ax_positions.set_xlabel("Start position (0-based, binned by 5)")
     ax_positions.set_ylabel("Count")
     ax_positions.set_xlim(0, main_length)
     ax_positions.legend(ncol=2)
+
+    # (3) total deletions per sequence by class5
     ax_total_del = axes_array[1, 0]
     x_vals = np.arange(0, max_total_deletions + 1).astype(float)
-    bar_width = 0.16  # width of each class bar at each deletion count
+    bar_width = 0.16
 
-    # Offsets for grouped bars so classes are side-by-side at each x
     offsets: List[float] = []
     for idx in range(len(CLASS_ORDER)):
         offsets.append((idx - (len(CLASS_ORDER) - 1) / 2.0) * bar_width)
 
     any_nonzero_total = False
-
     for class_idx, class_name in enumerate(CLASS_ORDER):
         subset_vals = df.loc[df["class5"] == class_name, "total_deletions"].to_numpy()
 
@@ -504,7 +561,6 @@ def main() -> None:
         else:
             counts = np.zeros(max_total_deletions + 1, dtype=int)
 
-        # If all sequences in this class have zero deletions, this will be all zeros
         if counts[1:].sum() > 0:
             any_nonzero_total = True
 
@@ -528,10 +584,10 @@ def main() -> None:
             ax_total_del.set_xticks(np.arange(0, max_total_deletions + 1, 2))
         ax_total_del.legend()
     else:
-        # If absolutely no sequence has deletions, hide this axis
         ax_total_del.set_axis_off()
-    ax_between_both = axes_array[1, 1]
 
+    # (4) both_exact_once: deletions between motifs
+    ax_between_both = axes_array[1, 1]
     if both_between.size > 0:
         max_between = int(both_between.max())
         x_between = np.arange(0, max_between + 1)
@@ -580,6 +636,7 @@ def main() -> None:
     else:
         ax_between_both.set_axis_off()
 
+    # (5) transition counts
     ax_trans_counts = axes_array[2, 0]
     nonzero_transitions: List[str] = []
     nonzero_heights: List[int] = []
@@ -608,7 +665,6 @@ def main() -> None:
         ax_trans_counts.set_xticks(x_positions)
         ax_trans_counts.set_xticklabels(nonzero_transitions)
 
-        # Annotate each bar with absolute count and percentage
         for i, bar in enumerate(bars):
             height = nonzero_heights[i]
             fraction = height / total_transitions * 100.0
@@ -624,6 +680,7 @@ def main() -> None:
     else:
         ax_trans_counts.set_axis_off()
 
+    # (6) deletions between consecutive motifs
     ax_trans_del = axes_array[2, 1]
     total_transition_values = sum(arr.size for arr in transition_values.values())
 
@@ -676,7 +733,7 @@ def main() -> None:
     fig.suptitle("Motif and deletion statistics — 6 plots", y=0.995, fontsize=16)
     fig.tight_layout(rect=[0, 0, 1, 0.98])
 
-    out_png = PLOT_DIR / "summary_6plots_class5.png"
+    out_png = PLOT_DIR / "summary_6plots_class5_and_totmotif.png"
     fig.savefig(out_png, dpi=220, bbox_inches="tight")
     plt.show()
 
