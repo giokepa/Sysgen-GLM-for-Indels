@@ -5,7 +5,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
+from matplotlib.lines import Line2D
 
+# -------------------------------------------------------------------
+# Configuration
+# -------------------------------------------------------------------
 CSV_PATH = (
     "/Users/amelielaura/Documents/"
     "eval_motif_only__PAIRED__ALT_DUPBOTH__A65_B47_bothFlanks100_bothBetween20_cleaned.csv"
@@ -20,7 +24,14 @@ PANEL_COLORS: Dict[str, str] = {
     "A_only": "#56B4E9",
     "B_only": "#009E73",
     "both_flanks": "#D55E00",
-    "both_between": "#CC79A7",
+    "both_between": "#CC79A7"
+}
+
+PANEL_PRETTY: Dict[str, str] = {
+    "A_only": "only motif A present",
+    "B_only": "only motif B present",
+    "both_flanks": "both motifs; deletions only in background",
+    "both_between": "both motifs; deletions in-between motifs",
 }
 
 REF_COLOR = "#0072B2"
@@ -52,6 +63,9 @@ def paired_clean(reference: pd.Series, alternative: pd.Series) -> Tuple[np.ndarr
 
 
 def paired_stats(reference_values: np.ndarray, alternative_values: np.ndarray) -> Dict[str, Any]:
+    """
+    Compute basic paired statistics and tests (paired t-test, Wilcoxon).
+    """
     if reference_values.size < 2:
         return {
             "n_pairs": int(reference_values.size),
@@ -105,9 +119,13 @@ def add_boxplot_subplot(
     stats_dict: Dict[str, Any],
     alt_color: str,
 ) -> None:
+    """
+    Draw one panel comparing REFERENCE vs ALTERNATIVE motif-only cross-entropy
+    for a specific motif configuration (A_only, B_only, both_flanks, both_between).
+    """
     boxplot_result = ax.boxplot(
         [reference_values, alternative_values],
-        labels=["REFERENCE", "ALTERNATIVE"],
+        labels=["Reference", "Alternative"],
         showfliers=False,
         patch_artist=True,
         medianprops={"color": MEDIAN_COLOR, "linewidth": 2.4},
@@ -125,6 +143,7 @@ def add_boxplot_subplot(
     alternative_box.set_facecolor(alt_color)
     alternative_box.set_alpha(ALT_ALPHA)
 
+    # Jittered individual paired points for visual impression of distribution
     random_generator = np.random.default_rng(0)
     value_lists = [reference_values, alternative_values]
 
@@ -147,11 +166,12 @@ def add_boxplot_subplot(
     ax.grid(axis="y", alpha=0.25)
     ax.set_axisbelow(True)
 
+    # Text box summarizing n, Δmean, Δmedian, and p-values
     text_lines = (
-        f"n = {stats_dict['n_pairs']}\n"
-        f"Δmean (ALT-REF) = {stats_dict['mean_difference_alternative_minus_reference']:.4g}\n"
-        f"Δmedian (ALT-REF) = {stats_dict['median_difference_alternative_minus_reference']:.4g}\n"
-        f"t-test p = {stats_dict['paired_t_pvalue']:.3g}\n"
+        f"n paired sequences = {stats_dict['n_pairs']}\n"
+        f"Δmean (ALT - REF) = {stats_dict['mean_difference_alternative_minus_reference']:.4g}\n"
+        f"Δmedian (ALT - REF) = {stats_dict['median_difference_alternative_minus_reference']:.4g}\n"
+        f"paired t-test p = {stats_dict['paired_t_pvalue']:.3g}\n"
         f"Wilcoxon p = {stats_dict['wilcoxon_pvalue']:.3g}"
     )
 
@@ -173,6 +193,9 @@ def add_boxplot_subplot(
 
 
 def compute_global_ylim(arrays: List[np.ndarray], pad_frac: float = 0.10) -> Tuple[float, float]:
+    """
+    Compute a global y-range over multiple arrays, with symmetric padding.
+    """
     if len(arrays) == 0:
         return None, None
 
@@ -191,12 +214,13 @@ def compute_global_ylim(arrays: List[np.ndarray], pad_frac: float = 0.10) -> Tup
     padding = (vmax - vmin) * pad_frac
     return vmin - padding, vmax + padding
 
-def main() -> None:
 
+# -------------------------------------------------------------------
+# Main
+# -------------------------------------------------------------------
+def main() -> None:
     ensure_directory_exists(OUTPUT_DIRECTORY)
     data_frame = pd.read_csv(CSV_PATH, dtype=str).replace("NA", np.nan)
-
-    # Decide which column defines the grouping into panels.
     if "bucket" in data_frame.columns:
         group_column = "bucket"
     elif "label" in data_frame.columns:
@@ -204,37 +228,47 @@ def main() -> None:
     else:
         raise ValueError("CSV must contain either 'bucket' or 'label' column.")
 
+    # Motif-only cross-entropy columns: REFERENCE vs ALTERNATIVE based
     required_columns = ["ce_ref_motif", "ce_alt_motif"]
     for column_name in required_columns:
         if column_name not in data_frame.columns:
             raise ValueError(f"Missing required column '{column_name}' in CSV.")
         data_frame[column_name] = convert_series_to_numeric_safe(data_frame[column_name])
+
     panel_keys = ["A_only", "B_only", "both_flanks", "both_between"]
 
     stats_records: List[Dict[str, Any]] = []
     all_ce_arrays: List[np.ndarray] = []
-
     figure, axes_array = plt.subplots(2, 2, figsize=(12, 9), sharey=True)
     flat_axes: List[plt.Axes] = list(axes_array.flatten())
 
     for axis, key in zip(flat_axes, panel_keys):
         subset = data_frame[data_frame[group_column] == key]
+        pretty_name = PANEL_PRETTY.get(key, key)
+
         if subset.empty:
-            axis.set_title(f"{key}: (no data)", fontsize=11)
+            axis.set_title(f"{pretty_name}: (no data)", fontsize=11)
             axis.axis("off")
             continue
 
+        # Convert REFERENCE and ALTERNATIVE motif-only cross-entropy to numeric pairs
         ref_ce, alt_ce = paired_clean(subset["ce_ref_motif"], subset["ce_alt_motif"])
         ce_stats = paired_stats(ref_ce, alt_ce)
 
         all_ce_arrays.append(ref_ce)
         all_ce_arrays.append(alt_ce)
 
-        stats_record: Dict[str, Any] = {"group": key, "metric": "motif_only_cross_entropy"}
+        stats_record: Dict[str, Any] = {
+            "group_raw": key,
+            "group_pretty": pretty_name,
+            "metric": "motif_only_cross_entropy",
+        }
         stats_record.update(ce_stats)
         stats_records.append(stats_record)
-
-        panel_title = f"{key}: REFERENCE vs ALTERNATIVE motif-only cross-entropy"
+        panel_title = (
+            f"{pretty_name}\n"
+            "REFERENCE vs ALTERNATIVE motif-only cross-entropy"
+        )
         alt_color = PANEL_COLORS.get(key, "#999999")
 
         add_boxplot_subplot(
@@ -250,23 +284,45 @@ def main() -> None:
         for axis in flat_axes:
             if axis.has_data():
                 axis.set_ylim(global_ymin, global_ymax)
-    flat_axes[0].set_ylabel("cross-entropy (motif-only)")
-    flat_axes[2].set_ylabel("cross-entropy (motif-only)")
+
+    # Y-label on left column panels
+    flat_axes[0].set_ylabel("motif-only cross-entropy")
+    flat_axes[2].set_ylabel("motif-only cross-entropy")
 
     figure.suptitle(
-        "Motif-only cross-entropy: REFERENCE vs ALTERNATIVE\n"
-        "Paired tests: paired t-test and Wilcoxon signed-rank",
-        fontsize=14,
+        "Motif-only cross-entropy: REFERENCE vs ALTERNATIVE based",
+        fontsize=13,
     )
-    figure.tight_layout(rect=[0, 0.03, 1, 0.93])
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="s",
+            color="none",
+            markerfacecolor=PANEL_COLORS[k],
+            markersize=10,
+            label=PANEL_PRETTY[k],
+        )
+        for k in panel_keys
+    ]
+    figure.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=2,
+        frameon=False,
+        fontsize=9,
+        bbox_to_anchor=(0.5, 0.01),
+    )
 
+    figure.tight_layout(rect=[0, 0.08, 1, 0.9])
+
+    # Save combined plot
     plot_path = os.path.join(
         OUTPUT_DIRECTORY,
         "boxplots_REF_vs_ALT__motif_only_CE__4panels.png",
     )
     figure.savefig(plot_path, dpi=220, bbox_inches="tight")
     plt.close(figure)
-
     stats_data_frame = pd.DataFrame(stats_records)
     stats_path = os.path.join(
         OUTPUT_DIRECTORY,
