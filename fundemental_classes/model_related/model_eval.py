@@ -132,7 +132,7 @@ class ModelEvaluator:
             motif_ce = self.compute_cross_entropy(model, sequence, motif_positions=motif_positions, four_nt_only=False)
             motif_perplexity = self.compute_perplexity(motif_ce)
 
-            ce_4nt = self.compute_cross_entropy(model, sequence, motif_positions=None, four_nt_only=True)
+            ce_4nt = self.compute_cross_entropy(model, sequence, motif_positions=motif_positions, four_nt_only=True)
             perplexity_4nt = self.compute_perplexity(ce_4nt)
 
             self.results[model_type]['motif_cross_entropies'].append(motif_ce)
@@ -156,7 +156,7 @@ class ModelEvaluator:
         print(f"  Min CE: {motif_ce_array.min():.4f}, Max CE: {motif_ce_array.max():.4f}")
 
         ce_4nt_array = np.array(self.results[results_key_4nt]['cross_entropies'])
-        print(f"\n{model_type.upper()} Model Results (4-NUCLEOTIDE COMPARISON):")
+        print(f"\n{model_type.upper()} Model Results (4-NUCLEOTIDE MOTIF COMPARISON):")
         print(f"  Cross-Entropy: {ce_4nt_array.mean():.4f} ± {ce_4nt_array.std():.4f}")
 
     def compare_models(self) -> Dict:
@@ -167,13 +167,20 @@ class ModelEvaluator:
         baseline_ce = np.array(self.results['baseline']['motif_cross_entropies'])
         deletion_ce = np.array(self.results['deletion']['motif_cross_entropies'])
 
-        if len(baseline_ce) == 0 or len(deletion_ce) == 0:
-            raise ValueError("Both models must be evaluated before comparison")
+        valid_mask = np.isfinite(baseline_ce) & np.isfinite(deletion_ce)
+
+        baseline_clean = baseline_ce[valid_mask]
+        deletion_clean = deletion_ce[valid_mask]
+
+        print(f"Excluded {len(baseline_ce) - len(baseline_clean)} sequences with invalid/infinite entropy.")
+
+        if len(baseline_clean) == 0:
+            raise ValueError("No valid sequences found for comparison (all were inf/nan).")
 
         comparison_results = {'motif_only': {}, '4nt_comparison': {}}
 
-        if len(baseline_ce) == len(deletion_ce):
-            t_stat, t_pvalue = stats.ttest_rel(baseline_ce, deletion_ce)
+        if len(baseline_clean) == len(deletion_clean):
+            t_stat, t_pvalue = stats.ttest_rel(baseline_clean, deletion_clean)
             comparison_results['motif_only']['paired_ttest'] = {
                 'statistic': float(t_stat),
                 'pvalue': float(t_pvalue),
@@ -181,11 +188,11 @@ class ModelEvaluator:
             }
             print(f"\nPaired t-test (Motif-only):")
             print(f"  t-statistic: {t_stat:.4f}")
-            print(f"  p-value: {t_pvalue:.6e}")
+            p_str = "< 1e-16" if t_pvalue < 1e-16 else f"{t_pvalue:.4e}"
+            print(f"  p-value: {p_str}")
             print(f"  Significant (α=0.05): {t_pvalue < 0.05}")
 
-        if len(baseline_ce) == len(deletion_ce):
-            w_stat, w_pvalue = stats.wilcoxon(baseline_ce, deletion_ce)
+            w_stat, w_pvalue = stats.wilcoxon(baseline_clean, deletion_clean)
             comparison_results['motif_only']['wilcoxon'] = {
                 'statistic': float(w_stat),
                 'pvalue': float(w_pvalue),
@@ -193,11 +200,12 @@ class ModelEvaluator:
             }
             print(f"\nWilcoxon signed-rank test (Motif-only):")
             print(f"  W-statistic: {w_stat:.4f}")
-            print(f"  p-value: {w_pvalue:.6e}")
+            p_str = "< 1e-16" if w_pvalue < 1e-16 else f"{w_pvalue:.4e}"
+            print(f"  p-value: {p_str}")
             print(f"  Significant (α=0.05): {w_pvalue < 0.05}")
 
-        mean_diff = baseline_ce.mean() - deletion_ce.mean()
-        pooled_std = np.sqrt((baseline_ce.std() ** 2 + deletion_ce.std() ** 2) / 2)
+        mean_diff = baseline_clean.mean() - deletion_clean.mean()
+        pooled_std = np.sqrt((baseline_clean.std() ** 2 + deletion_clean.std() ** 2) / 2)
         cohens_d = mean_diff / pooled_std
         comparison_results['motif_only']['effect_size'] = {
             'cohens_d': float(cohens_d),
@@ -207,14 +215,18 @@ class ModelEvaluator:
         print(f"  Interpretation: {self._interpret_cohens_d(cohens_d)}")
 
         print(f"\n{'=' * 60}")
-        print("4-NUCLEOTIDE COMPARISON (Fair Comparison)")
+        print("4-NUCLEOTIDE COMPARISON (Motif Regions)")
         print(f"{'=' * 60}")
 
         baseline_4nt = np.array(self.results['baseline_4nt']['cross_entropies'])
         deletion_4nt = np.array(self.results['deletion_4nt']['cross_entropies'])
 
-        if len(baseline_4nt) == len(deletion_4nt):
-            t_stat_4nt, t_pvalue_4nt = stats.ttest_rel(baseline_4nt, deletion_4nt)
+        valid_mask_4nt = np.isfinite(baseline_4nt) & np.isfinite(deletion_4nt)
+        baseline_4nt_clean = baseline_4nt[valid_mask_4nt]
+        deletion_4nt_clean = deletion_4nt[valid_mask_4nt]
+
+        if len(baseline_4nt_clean) == len(deletion_4nt_clean):
+            t_stat_4nt, t_pvalue_4nt = stats.ttest_rel(baseline_4nt_clean, deletion_4nt_clean)
             comparison_results['4nt_comparison']['paired_ttest'] = {
                 'statistic': float(t_stat_4nt),
                 'pvalue': float(t_pvalue_4nt),
@@ -222,10 +234,11 @@ class ModelEvaluator:
             }
             print(f"\nPaired t-test (4-nucleotide):")
             print(f"  t-statistic: {t_stat_4nt:.4f}")
-            print(f"  p-value: {t_pvalue_4nt:.6e}")
+            p_str = "< 1e-16" if t_pvalue_4nt < 1e-16 else f"{t_pvalue_4nt:.4e}"
+            print(f"  p-value: {p_str}")
             print(f"  Significant (α=0.05): {t_pvalue_4nt < 0.05}")
 
-            w_stat_4nt, w_pvalue_4nt = stats.wilcoxon(baseline_4nt, deletion_4nt)
+            w_stat_4nt, w_pvalue_4nt = stats.wilcoxon(baseline_4nt_clean, deletion_4nt_clean)
             comparison_results['4nt_comparison']['wilcoxon'] = {
                 'statistic': float(w_stat_4nt),
                 'pvalue': float(w_pvalue_4nt),
@@ -233,11 +246,12 @@ class ModelEvaluator:
             }
             print(f"\nWilcoxon signed-rank test (4-nucleotide):")
             print(f"  W-statistic: {w_stat_4nt:.4f}")
-            print(f"  p-value: {w_pvalue_4nt:.6e}")
+            p_str = "< 1e-16" if w_pvalue_4nt < 1e-16 else f"{w_pvalue_4nt:.4e}"
+            print(f"  p-value: {p_str}")
             print(f"  Significant (α=0.05): {w_pvalue_4nt < 0.05}")
 
-        mean_diff_4nt = baseline_4nt.mean() - deletion_4nt.mean()
-        pooled_std_4nt = np.sqrt((baseline_4nt.std() ** 2 + deletion_4nt.std() ** 2) / 2)
+        mean_diff_4nt = baseline_4nt_clean.mean() - deletion_4nt_clean.mean()
+        pooled_std_4nt = np.sqrt((baseline_4nt_clean.std() ** 2 + deletion_4nt_clean.std() ** 2) / 2)
         cohens_d_4nt = mean_diff_4nt / pooled_std_4nt
         comparison_results['4nt_comparison']['effect_size'] = {
             'cohens_d': float(cohens_d_4nt),
@@ -391,4 +405,3 @@ class ModelEvaluator:
 
         return pd.concat([baseline_motif_df, deletion_motif_df,
                           baseline_4nt_df, deletion_4nt_df], ignore_index=True)
-
