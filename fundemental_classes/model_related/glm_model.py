@@ -358,7 +358,6 @@ class GLMModel:
 
         if not log_history or len(log_history) < 2:
             print("No training logs available for plotting")
-            print(f"Log history length: {len(log_history)}")
             return
 
         train_losses = []
@@ -386,27 +385,51 @@ class GLMModel:
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
         ax1 = axes[0]
-        ax1.plot(train_steps, train_losses, 'b-', linewidth=2, marker='o', markersize=4, label='Training Loss',
-                 alpha=0.7)
+
+        warmup_points = max(10, len(train_steps) // 50)
+        ax1.plot(train_steps, train_losses, 'b-', linewidth=2, marker='o', markersize=2,
+                 label='Training Loss', alpha=0.7)
         if eval_losses:
-            ax1.plot(eval_steps, eval_losses, 'r-', linewidth=2, marker='s', markersize=4, label='Validation Loss',
-                     alpha=0.7)
+            ax1.plot(eval_steps, eval_losses, 'r-', linewidth=2, marker='s', markersize=2,
+                     label='Validation Loss', alpha=0.7)
+
+        stable_losses = train_losses[warmup_points:]
+        if eval_losses:
+            stable_losses += eval_losses[1:]
+
+        if stable_losses:
+            y_min = min(stable_losses) * 0.98
+            y_max = max(stable_losses) * 1.02
+
+            if y_max - y_min < 0.1:
+                y_center = (y_max + y_min) / 2
+                y_min = y_center - 0.15
+                y_max = y_center + 0.15
+
+            ax1.set_ylim(y_min, y_max)
+
         ax1.set_title('Training vs Validation Loss', fontsize=12, fontweight='bold')
         ax1.set_xlabel('Training Steps', fontsize=10)
         ax1.set_ylabel('Cross-Entropy Loss', fontsize=10)
         ax1.legend(loc='best', fontsize=9)
         ax1.grid(True, alpha=0.3, linestyle='--')
 
+        if len(train_losses) > 0:
+            ax1.text(0.02, 0.98, f'Initial loss: {train_losses[0]:.2f}',
+                     transform=ax1.transAxes, fontsize=8, verticalalignment='top',
+                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
         ax2 = axes[1]
         if lrs:
-            ax2.plot(lr_steps, lrs, 'g-', linewidth=2, marker='d', markersize=4)
+            ax2.plot(lr_steps, lrs, 'g-', linewidth=2, marker='d', markersize=2)
             ax2.set_title('Learning Rate Schedule', fontsize=12, fontweight='bold')
             ax2.set_xlabel('Training Steps', fontsize=10)
             ax2.set_ylabel('Learning Rate', fontsize=10)
             ax2.grid(True, alpha=0.3, linestyle='--')
             ax2.set_yscale('log')
         else:
-            ax2.text(0.5, 0.5, 'No LR data logged', ha='center', va='center', transform=ax2.transAxes, fontsize=11)
+            ax2.text(0.5, 0.5, 'No LR data logged', ha='center', va='center',
+                     transform=ax2.transAxes, fontsize=11)
             ax2.set_title('Learning Rate (No Data)', fontsize=12)
 
         plt.tight_layout()
@@ -416,6 +439,7 @@ class GLMModel:
         plt.show()
 
         print(f"\nTraining Summary:")
+        print(f"Initial training loss: {train_losses[0]:.4f}")
         print(f"Final training loss: {train_losses[-1]:.4f}")
         if eval_losses:
             print(f"Final validation loss: {eval_losses[-1]:.4f}")
@@ -436,7 +460,7 @@ class GLMModel:
                 "T": 8,
                 "-": 9
             }
-            temp_file = "temp_tokenizer_with_deletions.json"  # ← Unique name
+            temp_file = "temp_tokenizer_with_deletions.json"
         else:
             vocab = {
                 "[PAD]": 0,

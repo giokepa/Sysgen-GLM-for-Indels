@@ -11,22 +11,20 @@ import pandas as pd
 # -------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------
-#FASTA = Path(
-    #"/Users/amelielaura/Documents/Project6/new_augumented_sequence_size10000_length150_deletions0.2_nodeletionseq0.05.fasta"
-#)
-
 FASTA = Path(
-    "/Users/amelielaura/Documents/Project6/data/new_augumented_sequence_size10000_length150_deletions0_nodeletionseq0.05.fasta"
+    "/Users/amelielaura/Documents/new_augumented_sequence_size5000_length100_deletions0.2_nodeletionseq0.05.fasta"
 )
 
 OUT_DIR = Path("/Users/amelielaura/Documents/Project6/data/out_baseline")
 PLOT_DIR = Path("/Users/amelielaura/Documents/Project6/data/plotresults_baseline")
 
+# Motifs and their lengths
 MOTIF_A = "ATATTCA"
 MOTIF_B = "GTACTGC"
 LEN_A = len(MOTIF_A)
 LEN_B = len(MOTIF_B)
 
+# 5-class label scheme
 CLASS_ORDER = ["none", "only_A", "only_B", "both_exact_once", "multimotifs"]
 CLASS_PRETTY: Dict[str, str] = {
     "none": "none",
@@ -43,6 +41,7 @@ CLASS_COLOR: Dict[str, str] = {
     "multimotifs": "#984ea3",
 }
 
+# Motif transition types in multimotif sequences
 TRANS_ORDER = ["A->B", "B->A", "A->A", "B->B"]
 TRANS_COLOR: Dict[str, str] = {
     "A->B": "#e41a1c",
@@ -51,11 +50,30 @@ TRANS_COLOR: Dict[str, str] = {
     "B->B": "#ff7f00",
 }
 
+# Total motif count groups (A_count + B_count)
+MOTIFCOUNT_ORDER = ["0", "1", "2", "3", "4", "5plus"]
+MOTIFCOUNT_PRETTY: Dict[str, str] = {
+    "0": "0 motifs total",
+    "1": "1 motif total",
+    "2": "2 motifs total",
+    "3": "3 motifs total",
+    "4": "4 motifs total",
+    "5plus": "≥5 motifs total",
+}
+MOTIFCOUNT_COLOR: Dict[str, str] = {
+    "0": "#999999",
+    "1": "#377eb8",
+    "2": "#ff7f00",
+    "3": "#4daf4a",
+    "4": "#984ea3",
+    "5plus": "#e41a1c",
+}
+
 
 # -------------------------------------------------------------------
 # Plot style
 # -------------------------------------------------------------------
-def friendly_style() -> None:
+def set_friendly_style() -> None:
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.rcParams.update(
         {
@@ -75,7 +93,7 @@ def friendly_style() -> None:
     )
 
 
-friendly_style()
+set_friendly_style()
 
 
 # -------------------------------------------------------------------
@@ -85,12 +103,10 @@ def parse_pos_list(value: Optional[str]) -> List[int]:
     if value in (None, "None", ""):
         return []
     positions: List[int] = []
-    string_value = str(value)
-    parts = string_value.split(",")
-    for raw_entry in parts:
-        cleaned_entry = raw_entry.strip()
-        if cleaned_entry:
-            positions.append(int(cleaned_entry))
+    for raw_entry in str(value).split(","):
+        cleaned = raw_entry.strip()
+        if cleaned:
+            positions.append(int(cleaned))
     return positions
 
 
@@ -162,7 +178,26 @@ def classify_sequence(a_count: int, b_count: int) -> str:
     return "multimotifs"
 
 
-def count_del_between(sequence: str, start_pos: int, start_len: int, end_pos: int) -> float:
+def total_motif_group(total_count: int) -> str:
+    """
+    Map total motif count (A + B) to the groups 0,1,2,3,4,≥5.
+    """
+    if total_count == 0:
+        return "0"
+    if total_count == 1:
+        return "1"
+    if total_count == 2:
+        return "2"
+    if total_count == 3:
+        return "3"
+    if total_count == 4:
+        return "4"
+    return "5plus"
+
+
+def count_deletions_between(
+    sequence: str, start_pos: int, start_len: int, end_pos: int
+) -> float:
     start_index = start_pos + start_len
     end_index = end_pos
     if end_index < start_index:
@@ -177,10 +212,10 @@ def event_sort_key(entry: Tuple[int, str, int]) -> int:
 
 def build_events(posA: List[int], posB: List[int]) -> List[Tuple[int, str, int]]:
     events: List[Tuple[int, str, int]] = []
-    for position_a in posA:
-        events.append((position_a, "A", LEN_A))
-    for position_b in posB:
-        events.append((position_b, "B", LEN_B))
+    for p in posA:
+        events.append((p, "A", LEN_A))
+    for p in posB:
+        events.append((p, "B", LEN_B))
     events.sort(key=event_sort_key)
     return events
 
@@ -204,50 +239,56 @@ def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
-    dataframe = read_fasta_with_metadata(FASTA)
-    if dataframe.empty:
+    # ---------------------------------------------------------------
+    # Load data and basic columns
+    # ---------------------------------------------------------------
+    df = read_fasta_with_metadata(FASTA)
+    if df.empty:
         raise ValueError("No sequences found in FASTA.")
 
-    # basic derived columns
-    dataframe["sequence_length"] = dataframe["seq"].str.len()
-    dataframe["total_deletions"] = dataframe["seq"].str.count("-").astype(int)
+    df["seq"] = df["seq"].astype(str)
+    df["sequence_length"] = df["seq"].str.len()
+    df["total_deletions"] = df["seq"].str.count("-").astype(int)
 
     # counts of motif A and B per sequence
-    a_counts: List[int] = []
-    b_counts: List[int] = []
-    for row in dataframe.itertuples(index=False):
-        a_counts.append(len(row.posA_list))
-        b_counts.append(len(row.posB_list))
-    dataframe["A_count"] = a_counts
-    dataframe["B_count"] = b_counts
+    df["A_count"] = df["posA_list"].apply(len)
+    df["B_count"] = df["posB_list"].apply(len)
+
+    # total motifs (A+B) and motif-count groups
+    df["total_motifs"] = df["A_count"] + df["B_count"]
+    df["motif_group"] = df["total_motifs"].apply(total_motif_group)
 
     # 5‑class labels
-    class5_list: List[str] = []
-    for a_value, b_value in zip(dataframe["A_count"], dataframe["B_count"]):
-        class5_list.append(classify_sequence(int(a_value), int(b_value)))
-    dataframe["class5"] = class5_list
+    df["class5"] = [
+        classify_sequence(int(a), int(b)) for a, b in zip(df["A_count"], df["B_count"])
+    ]
 
     # class counts
     class_counts = (
-        dataframe["class5"]
+        df["class5"]
         .value_counts()
         .reindex(CLASS_ORDER, fill_value=0)
         .rename_axis("class5")
         .reset_index(name="count")
     )
-    class_counts["percent"] = (class_counts["count"] / len(dataframe) * 100).round(2)
+    class_counts["percent"] = (class_counts["count"] / len(df) * 100).round(2)
     class_counts.to_csv(OUT_DIR / "class5_counts.csv", index=False)
 
-    # both_exact_once: deletions between the two motifs
-    both_exact_once_df = dataframe[dataframe["class5"] == "both_exact_once"].copy()
+    # ---------------------------------------------------------------
+    # both_exact_once: deletions between motifs
+    # ---------------------------------------------------------------
+    both_exact_once_df = df[df["class5"] == "both_exact_once"].copy()
     both_between = np.array([], dtype=int)
+
     if not both_exact_once_df.empty:
         deletions_between_list: List[int] = []
         for row in both_exact_once_df.itertuples(index=False):
             if not row.posA_list or not row.posB_list:
                 continue
+
             first_a = int(row.posA_list[0])
             first_b = int(row.posB_list[0])
+
             if first_a <= first_b:
                 start_pos = first_a
                 end_pos = first_b
@@ -256,26 +297,33 @@ def main() -> None:
                 start_pos = first_b
                 end_pos = first_a
                 start_len = LEN_B
-            deletions_between = count_del_between(row.seq, start_pos, start_len, end_pos)
+
+            deletions_between = count_deletions_between(
+                row.seq, start_pos, start_len, end_pos
+            )
             if not np.isnan(deletions_between):
                 deletions_between_list.append(int(deletions_between))
+
         if deletions_between_list:
             both_between = np.array(deletions_between_list, dtype=int)
 
-    # multimotifs: transitions and deletions between motifs
-    multimotifs_df = dataframe[dataframe["class5"] == "multimotifs"].copy()
+    # ---------------------------------------------------------------
+    # multimotifs: motif transitions and deletions between them
+    # ---------------------------------------------------------------
+    multimotifs_df = df[df["class5"] == "multimotifs"].copy()
     transition_rows: List[Dict[str, Any]] = []
+
     if not multimotifs_df.empty:
         for row in multimotifs_df.itertuples(index=False):
             events = build_events(row.posA_list, row.posB_list)
             sequence_string = row.seq
-            sequence_id = row.id
-            last_index = len(events) - 1
-            event_index = 0
-            while event_index < last_index:
-                position_1, type_1, length_1 = events[event_index]
-                position_2, type_2, length_2_unused = events[event_index + 1]
-                deletions_between = count_del_between(
+            seq_id = row.id
+
+            for idx in range(len(events) - 1):
+                position_1, type_1, length_1 = events[idx]
+                position_2, type_2, _ = events[idx + 1]
+
+                deletions_between = count_deletions_between(
                     sequence_string,
                     int(position_1),
                     int(length_1),
@@ -283,69 +331,97 @@ def main() -> None:
                 )
                 transition_rows.append(
                     {
-                        "id": sequence_id,
+                        "id": seq_id,
                         "transition": f"{type_1}->{type_2}",
                         "del_between": deletions_between,
                     }
                 )
-                event_index += 1
 
-    transitions_dataframe = pd.DataFrame(transition_rows)
-    transitions_dataframe.to_csv(OUT_DIR / "multimotif_transitions.csv", index=False)
+    transitions_df = pd.DataFrame(transition_rows)
+    transitions_df.to_csv(OUT_DIR / "multimotif_transitions.csv", index=False)
 
-    # ---- prepare data for plots ----
-    max_total_deletions = int(dataframe["total_deletions"].max())
-
-    main_length = int(dataframe["sequence_length"].mode().iloc[0])
+    # ---------------------------------------------------------------
+    # Histograms and transition stats
+    # ---------------------------------------------------------------
+    max_total_deletions = int(df["total_deletions"].max())
+    main_length = int(df["sequence_length"].mode().iloc[0])
     bin_edges = np.arange(0, main_length + 1, 5)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
+    # motif positions by class5 (for plots using class5)
     histA_by_class: Dict[str, np.ndarray] = {}
     histB_by_class: Dict[str, np.ndarray] = {}
     for class_name in CLASS_ORDER:
         a_positions_all = flatten_lists(
-            dataframe.loc[dataframe["class5"] == class_name, "posA_list"]
+            df.loc[df["class5"] == class_name, "posA_list"]
         )
         b_positions_all = flatten_lists(
-            dataframe.loc[dataframe["class5"] == class_name, "posB_list"]
+            df.loc[df["class5"] == class_name, "posB_list"]
         )
 
         if a_positions_all.size > 0:
-            histA_by_class[class_name] = np.histogram(a_positions_all, bins=bin_edges)[0]
+            histA_by_class[class_name] = np.histogram(
+                a_positions_all, bins=bin_edges
+            )[0]
         else:
             histA_by_class[class_name] = np.zeros(len(bin_centers), dtype=int)
 
         if b_positions_all.size > 0:
-            histB_by_class[class_name] = np.histogram(b_positions_all, bins=bin_edges)[0]
+            histB_by_class[class_name] = np.histogram(
+                b_positions_all, bins=bin_edges
+            )[0]
         else:
             histB_by_class[class_name] = np.zeros(len(bin_centers), dtype=int)
 
+    # motif positions by total motif group (for plot 2)
+    histA_by_group: Dict[str, np.ndarray] = {}
+    histB_by_group: Dict[str, np.ndarray] = {}
+    for group in MOTIFCOUNT_ORDER:
+        a_positions_all = flatten_lists(
+            df.loc[df["motif_group"] == group, "posA_list"]
+        )
+        b_positions_all = flatten_lists(
+            df.loc[df["motif_group"] == group, "posB_list"]
+        )
+
+        if a_positions_all.size > 0:
+            histA_by_group[group] = np.histogram(a_positions_all, bins=bin_edges)[0]
+        else:
+            histA_by_group[group] = np.zeros(len(bin_centers), dtype=int)
+
+        if b_positions_all.size > 0:
+            histB_by_group[group] = np.histogram(b_positions_all, bins=bin_edges)[0]
+        else:
+            histB_by_group[group] = np.zeros(len(bin_centers), dtype=int)
+
     transition_counts: Dict[str, int] = {}
     transition_values: Dict[str, np.ndarray] = {}
-    for transition_name in TRANS_ORDER:
-        transition_counts[transition_name] = 0
-        transition_values[transition_name] = np.array([], dtype=int)
+    for t in TRANS_ORDER:
+        transition_counts[t] = 0
+        transition_values[t] = np.array([], dtype=int)
 
-    if not transitions_dataframe.empty:
-        for transition_name in TRANS_ORDER:
-            subset_series = transitions_dataframe.loc[
-                transitions_dataframe["transition"] == transition_name, "del_between"
+    if not transitions_df.empty:
+        for t in TRANS_ORDER:
+            subset = transitions_df.loc[
+                transitions_df["transition"] == t, "del_between"
             ].dropna()
-            transition_counts[transition_name] = int(subset_series.shape[0])
-            if subset_series.shape[0] > 0:
-                transition_values[transition_name] = subset_series.astype(int).to_numpy()
+            transition_counts[t] = int(subset.shape[0])
+            if subset.shape[0] > 0:
+                transition_values[t] = subset.astype(int).to_numpy()
 
-    # -------------------------------------------------------------------
-    # CASE 1: no deletions -> only motif‑based plots
-    # -------------------------------------------------------------------
+    # ---------------------------------------------------------------
+    # Case 1: no deletions → only motif-based plots
+    # ---------------------------------------------------------------
     if max_total_deletions == 0:
-        figure, axes_array = plt.subplots(1, 2, figsize=(12, 5))
-        axis_classes = axes_array[0]
-        axis_positions = axes_array[1]
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        ax_classes = axes[0]
+        ax_positions = axes[1]
 
+        # Plot 1: class counts (class5)
         pretty_labels: List[str] = []
         count_values: List[int] = []
         color_values: List[str] = []
+
         for class_name in CLASS_ORDER:
             pretty_labels.append(CLASS_PRETTY[class_name])
             count_value = int(
@@ -353,57 +429,69 @@ def main() -> None:
             )
             count_values.append(count_value)
             color_values.append(CLASS_COLOR[class_name])
-        axis_classes.bar(
+
+        ax_classes.bar(
             pretty_labels,
             count_values,
             color=color_values,
             edgecolor="#333333",
             linewidth=0.6,
         )
-        axis_classes.set_title("Class counts (5-class scheme)")
-        axis_classes.set_xlabel("Class")
-        axis_classes.set_ylabel("Number of sequences")
-        axis_classes.tick_params(axis="x", rotation=15)
+        ax_classes.set_title("Class counts (5-class scheme)")
+        ax_classes.set_xlabel("Class")
+        ax_classes.set_ylabel("Number of sequences")
+        ax_classes.tick_params(axis="x", rotation=15)
 
-        for class_name in CLASS_ORDER:
-            hist_a = histA_by_class[class_name]
-            hist_b = histB_by_class[class_name]
+        # Plot 2: motif positions by total motif count group
+        for group in MOTIFCOUNT_ORDER:
+            hist_a = histA_by_group[group]
+            hist_b = histB_by_group[group]
+
             if hist_a.sum() > 0:
-                axis_positions.plot(
-                    bin_centers, hist_a, label=f"A | {CLASS_PRETTY[class_name]}"
+                ax_positions.plot(
+                    bin_centers,
+                    hist_a,
+                    color=MOTIFCOUNT_COLOR[group],
+                    label=f"A | {MOTIFCOUNT_PRETTY[group]}",
                 )
             if hist_b.sum() > 0:
-                axis_positions.plot(
+                ax_positions.plot(
                     bin_centers,
                     hist_b,
+                    color=MOTIFCOUNT_COLOR[group],
                     linestyle="--",
-                    label=f"B | {CLASS_PRETTY[class_name]}",
+                    label=f"B | {MOTIFCOUNT_PRETTY[group]}",
                 )
-        axis_positions.set_title("Motif start positions (A solid, B dashed)")
-        axis_positions.set_xlabel("Start position (0-based, binned by 5)")
-        axis_positions.set_ylabel("Count")
-        axis_positions.set_xlim(0, main_length)
-        axis_positions.legend(ncol=2)
 
-        figure.suptitle("Motif statistics (no deletions present)", y=0.98, fontsize=14)
-        figure.tight_layout(rect=[0, 0, 1, 0.95])
+        ax_positions.set_title(
+            "Motif start positions by total motif count\n"
+            "(A solid, B dashed; groups 0,1,2,3,4,≥5)"
+        )
+        ax_positions.set_xlabel("Start position (0-based, binned by 5)")
+        ax_positions.set_ylabel("Count")
+        ax_positions.set_xlim(0, main_length)
+        ax_positions.legend(ncol=2)
 
-        output_png = PLOT_DIR / "summary_motif_only_no_deletions.png"
-        figure.savefig(output_png, dpi=220, bbox_inches="tight")
+        fig.suptitle("Motif statistics (no deletions present)", y=0.98, fontsize=14)
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+        out_png = PLOT_DIR / "summary_motif_only_no_deletions.png"
+        fig.savefig(out_png, dpi=220, bbox_inches="tight")
         plt.show()
         return
 
-    # -------------------------------------------------------------------
-    # CASE 2: deletions present -> 6 plots
-    # -------------------------------------------------------------------
-    figure, axes_array = plt.subplots(3, 2, figsize=(16, 12))
+    # ---------------------------------------------------------------
+    # Case 2: deletions present → 6 plots
+    # ---------------------------------------------------------------
+    fig, axes_array = plt.subplots(3, 2, figsize=(16, 12))
     axes_array = axes_array.reshape(3, 2)
 
-    # (1) class counts
-    axis_classes = axes_array[0, 0]
+    # (1) class counts by class5
+    ax_classes = axes_array[0, 0]
     pretty_labels = []
     count_values = []
     color_values = []
+
     for class_name in CLASS_ORDER:
         pretty_labels.append(CLASS_PRETTY[class_name])
         count_value = int(
@@ -411,64 +499,73 @@ def main() -> None:
         )
         count_values.append(count_value)
         color_values.append(CLASS_COLOR[class_name])
-    axis_classes.bar(
+
+    ax_classes.bar(
         pretty_labels,
         count_values,
         color=color_values,
         edgecolor="#333333",
         linewidth=0.6,
     )
-    axis_classes.set_title("1) Class counts (5-class scheme)")
-    axis_classes.set_xlabel("Class")
-    axis_classes.set_ylabel("Number of sequences")
-    axis_classes.tick_params(axis="x", rotation=15)
+    ax_classes.set_title("1) Class counts (5-class scheme)")
+    ax_classes.set_xlabel("Class")
+    ax_classes.set_ylabel("Number of sequences")
+    ax_classes.tick_params(axis="x", rotation=15)
 
-    # (2) motif positions
-    axis_positions = axes_array[0, 1]
-    for class_name in CLASS_ORDER:
-        hist_a = histA_by_class[class_name]
-        hist_b = histB_by_class[class_name]
+    # (2) motif positions by total motif count group
+    ax_positions = axes_array[0, 1]
+    for group in MOTIFCOUNT_ORDER:
+        hist_a = histA_by_group[group]
+        hist_b = histB_by_group[group]
+
         if hist_a.sum() > 0:
-            axis_positions.plot(
-                bin_centers, hist_a, label=f"A | {CLASS_PRETTY[class_name]}"
+            ax_positions.plot(
+                bin_centers,
+                hist_a,
+                color=MOTIFCOUNT_COLOR[group],
+                label=f"A | {MOTIFCOUNT_PRETTY[group]}",
             )
         if hist_b.sum() > 0:
-            axis_positions.plot(
+            ax_positions.plot(
                 bin_centers,
                 hist_b,
+                color=MOTIFCOUNT_COLOR[group],
                 linestyle="--",
-                label=f"B | {CLASS_PRETTY[class_name]}",
+                label=f"B | {MOTIFCOUNT_PRETTY[group]}",
             )
-    axis_positions.set_title("2) Motif start positions (A solid, B dashed)")
-    axis_positions.set_xlabel("Start position (0-based, binned by 5)")
-    axis_positions.set_ylabel("Count")
-    axis_positions.set_xlim(0, main_length)
-    axis_positions.legend(ncol=2)
 
-    # (3) total deletions per sequence by class
-    axis_total_del = axes_array[1, 0]
-    x_values = np.arange(0, max_total_deletions + 1).astype(float)
+    ax_positions.set_title(
+        "2) Motif start positions by total motifs\n"
+        "(A solid, B dashed; groups 0,1,2,3,4,≥5)"
+    )
+    ax_positions.set_xlabel("Start position (0-based, binned by 5)")
+    ax_positions.set_ylabel("Count")
+    ax_positions.set_xlim(0, main_length)
+    ax_positions.legend(ncol=2)
+
+    # (3) total deletions per sequence by class5
+    ax_total_del = axes_array[1, 0]
+    x_vals = np.arange(0, max_total_deletions + 1).astype(float)
     bar_width = 0.16
+
     offsets: List[float] = []
-    offset_index = 0
-    while offset_index < len(CLASS_ORDER):
-        value = (offset_index - (len(CLASS_ORDER) - 1) / 2.0) * bar_width
-        offsets.append(value)
-        offset_index += 1
+    for idx in range(len(CLASS_ORDER)):
+        offsets.append((idx - (len(CLASS_ORDER) - 1) / 2.0) * bar_width)
 
     any_nonzero_total = False
-    for class_index, class_name in enumerate(CLASS_ORDER):
-        subset_values = dataframe.loc[
-            dataframe["class5"] == class_name, "total_deletions"
-        ].to_numpy()
-        if subset_values.size > 0:
-            counts = np.bincount(subset_values, minlength=max_total_deletions + 1)
+    for class_idx, class_name in enumerate(CLASS_ORDER):
+        subset_vals = df.loc[df["class5"] == class_name, "total_deletions"].to_numpy()
+
+        if subset_vals.size > 0:
+            counts = np.bincount(subset_vals, minlength=max_total_deletions + 1)
         else:
             counts = np.zeros(max_total_deletions + 1, dtype=int)
+
         if counts[1:].sum() > 0:
             any_nonzero_total = True
-        axis_total_del.bar(
-            x_values + offsets[class_index],
+
+        ax_total_del.bar(
+            x_vals + offsets[class_idx],
             counts,
             width=bar_width * 0.95,
             color=CLASS_COLOR[class_name],
@@ -476,28 +573,30 @@ def main() -> None:
             linewidth=0.5,
             label=CLASS_PRETTY[class_name],
         )
-    if any_nonzero_total:
-        axis_total_del.set_title("3) Total deletions per sequence by class")
-        axis_total_del.set_xlabel("Total deletions (count of '-')")
-        axis_total_del.set_ylabel("Count")
-        if max_total_deletions <= 25:
-            axis_total_del.set_xticks(np.arange(0, max_total_deletions + 1, 1))
-        else:
-            axis_total_del.set_xticks(np.arange(0, max_total_deletions + 1, 2))
-        axis_total_del.legend()
-    else:
-        axis_total_del.set_axis_off()
 
-    # (4) both_exact_once: deletions between motifs (clean PMF)
-    axis_between_both = axes_array[1, 1]
+    if any_nonzero_total:
+        ax_total_del.set_title("3) Total deletions per sequence by class")
+        ax_total_del.set_xlabel("Total deletions (count of '-') per sequence")
+        ax_total_del.set_ylabel("Number of sequences")
+        if max_total_deletions <= 25:
+            ax_total_del.set_xticks(np.arange(0, max_total_deletions + 1, 1))
+        else:
+            ax_total_del.set_xticks(np.arange(0, max_total_deletions + 1, 2))
+        ax_total_del.legend()
+    else:
+        ax_total_del.set_axis_off()
+
+    # (4) both_exact_once: deletions between motifs
+    ax_between_both = axes_array[1, 1]
     if both_between.size > 0:
         max_between = int(both_between.max())
         x_between = np.arange(0, max_between + 1)
+
         counts_between = np.bincount(both_between, minlength=max_between + 1)
         total_pairs = float(both_between.size)
         prob_between = counts_between / total_pairs
 
-        axis_between_both.bar(
+        ax_between_both.bar(
             x_between,
             prob_between,
             color=CLASS_COLOR["both_exact_once"],
@@ -508,65 +607,69 @@ def main() -> None:
 
         mean_between = float(both_between.mean())
         median_between = float(np.median(both_between))
-        axis_between_both.axvline(
+
+        ax_between_both.axvline(
             mean_between,
             color="#555555",
             linestyle=":",
             linewidth=1.1,
         )
 
-        axis_between_both.set_title("4) both_exact_once: deletions between motifs")
-        axis_between_both.set_xlabel("Number of deletions between motifs")
-        axis_between_both.set_ylabel("Fraction of motif pairs")
+        ax_between_both.set_title("4) both_exact_once: deletions between motifs")
+        ax_between_both.set_xlabel("Number of deletions between motifs")
+        ax_between_both.set_ylabel("Fraction of motif pairs")
 
         if max_between <= 25:
-            axis_between_both.set_xticks(x_between)
+            ax_between_both.set_xticks(x_between)
         else:
-            axis_between_both.set_xticks(np.arange(0, max_between + 1, 2))
+            ax_between_both.set_xticks(np.arange(0, max_between + 1, 2))
 
-        axis_between_both.text(
+        ax_between_both.text(
             0.98,
             0.95,
             f"mean = {mean_between:.2f}\nmedian = {median_between:.2f}",
             ha="right",
             va="top",
-            transform=axis_between_both.transAxes,
+            transform=ax_between_both.transAxes,
             fontsize=8,
         )
     else:
-        axis_between_both.set_axis_off()
+        ax_between_both.set_axis_off()
 
-    # (5) multimotifs: transition counts (compact labels)
-    axis_trans_counts = axes_array[2, 0]
+    # (5) transition counts
+    ax_trans_counts = axes_array[2, 0]
     nonzero_transitions: List[str] = []
     nonzero_heights: List[int] = []
-    for transition_name in TRANS_ORDER:
-        count_value = transition_counts[transition_name]
-        if count_value > 0:
-            nonzero_transitions.append(transition_name)
-            nonzero_heights.append(count_value)
+
+    for t in TRANS_ORDER:
+        count_val = transition_counts[t]
+        if count_val > 0:
+            nonzero_transitions.append(t)
+            nonzero_heights.append(count_val)
 
     if nonzero_transitions:
         total_transitions = float(sum(nonzero_heights))
         x_positions = np.arange(len(nonzero_transitions))
-        bar_list = axis_trans_counts.bar(
+
+        bars = ax_trans_counts.bar(
             x_positions,
             nonzero_heights,
             color=[TRANS_COLOR[t] for t in nonzero_transitions],
             edgecolor="white",
             linewidth=0.6,
         )
-        axis_trans_counts.set_title("5) multimotifs: transition counts")
-        axis_trans_counts.set_xlabel("Transition (consecutive motifs)")
-        axis_trans_counts.set_ylabel("Number of transitions")
-        axis_trans_counts.set_xticks(x_positions)
-        axis_trans_counts.set_xticklabels(nonzero_transitions)
 
-        for index, bar in enumerate(bar_list):
-            height = nonzero_heights[index]
+        ax_trans_counts.set_title("5) multimotifs: transition counts")
+        ax_trans_counts.set_xlabel("Transition (consecutive motifs)")
+        ax_trans_counts.set_ylabel("Number of transitions")
+        ax_trans_counts.set_xticks(x_positions)
+        ax_trans_counts.set_xticklabels(nonzero_transitions)
+
+        for i, bar in enumerate(bars):
+            height = nonzero_heights[i]
             fraction = height / total_transitions * 100.0
             x_center = bar.get_x() + bar.get_width() / 2.0
-            axis_trans_counts.text(
+            ax_trans_counts.text(
                 x_center,
                 height,
                 f"{height}\n({fraction:.1f}%)",
@@ -575,67 +678,63 @@ def main() -> None:
                 fontsize=8,
             )
     else:
-        axis_trans_counts.set_axis_off()
+        ax_trans_counts.set_axis_off()
 
-    # (6) multimotifs: deletions between consecutive motifs
-    axis_trans_del = axes_array[2, 1]
-    total_transition_values = 0
-    for value_array in transition_values.values():
-        total_transition_values += value_array.size
+    # (6) deletions between consecutive motifs
+    ax_trans_del = axes_array[2, 1]
+    total_transition_values = sum(arr.size for arr in transition_values.values())
 
     if total_transition_values > 0:
         global_max = 0
-        for transition_name in TRANS_ORDER:
-            array_for_transition = transition_values[transition_name]
-            if array_for_transition.size > 0:
-                local_max = int(array_for_transition.max())
+        for t in TRANS_ORDER:
+            arr = transition_values[t]
+            if arr.size > 0:
+                local_max = int(arr.max())
                 if local_max > global_max:
                     global_max = local_max
 
         if global_max > 0:
             x_bins = np.arange(0, global_max + 1)
-            for transition_name in TRANS_ORDER:
-                values_for_transition = transition_values[transition_name]
-                if values_for_transition.size == 0:
+
+            for t in TRANS_ORDER:
+                arr = transition_values[t]
+                if arr.size == 0:
                     continue
 
-                counts_for_transition = np.bincount(
-                    values_for_transition, minlength=global_max + 1
-                )
-                total_for_transition = float(values_for_transition.size)
-                fractions_for_transition = counts_for_transition / total_for_transition
-                mean_for_transition = float(values_for_transition.mean())
-                label_text = f"{transition_name} (mean {mean_for_transition:.2f})"
+                counts = np.bincount(arr, minlength=global_max + 1)
+                total_for_t = float(arr.size)
+                fractions = counts / total_for_t
+                mean_for_t = float(arr.mean())
 
-                axis_trans_del.plot(
+                label_text = f"{t} (mean {mean_for_t:.2f})"
+
+                ax_trans_del.plot(
                     x_bins,
-                    fractions_for_transition,
+                    fractions,
                     marker="o",
                     markersize=3,
                     linewidth=1.2,
                     label=label_text,
                 )
 
-            axis_trans_del.set_title(
+            ax_trans_del.set_title(
                 "6) multimotifs: deletions between consecutive motifs"
             )
-            axis_trans_del.set_xlabel("Deletions between consecutive motifs")
-            axis_trans_del.set_ylabel("Fraction of transitions")
+            ax_trans_del.set_xlabel("Deletions between consecutive motifs")
+            ax_trans_del.set_ylabel("Fraction of transitions")
             if global_max <= 25:
-                axis_trans_del.set_xticks(x_bins)
-            axis_trans_del.legend()
+                ax_trans_del.set_xticks(x_bins)
+            ax_trans_del.legend()
         else:
-            axis_trans_del.set_axis_off()
+            ax_trans_del.set_axis_off()
     else:
-        axis_trans_del.set_axis_off()
+        ax_trans_del.set_axis_off()
 
-    figure.suptitle(
-        "Motif and deletion statistics — 6 plots", y=0.995, fontsize=16
-    )
-    figure.tight_layout(rect=[0, 0, 1, 0.98])
+    fig.suptitle("Motif and deletion statistics — 6 plots", y=0.995, fontsize=16)
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
 
-    output_png = PLOT_DIR / "summary_6plots_class5.png"
-    figure.savefig(output_png, dpi=220, bbox_inches="tight")
+    out_png = PLOT_DIR / "summary_6plots_class5_and_totmotif.png"
+    fig.savefig(out_png, dpi=220, bbox_inches="tight")
     plt.show()
 
 
